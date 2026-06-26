@@ -26,7 +26,7 @@ statsbomb:
     - {name: "Euro 2020",          competition_id: 55,  season_id: 43,  provider: statsbomb, has_360: true}
     - {name: "Copa America 2024",  competition_id: 223, season_id: 282, provider: statsbomb, has_360: false}
     - {name: "AFCON 2023",         competition_id: 1267, season_id: 107, provider: statsbomb, has_360: true}
-  # NOTE: season_ids above are filled in by `list-competitions` — verify on first run.
+  # IDs verified against the live StatsBomb catalog 2026-06-26 (all six confirmed).
   sb_cores: 4                   # parallelism for bulk pulls (SB_CORES env var)
 
 # Form / minutes / lineups for friendlies + qualifiers. Post-2026-01-20 FBref no
