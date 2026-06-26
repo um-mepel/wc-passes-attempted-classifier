@@ -73,9 +73,11 @@ def build(pm: pd.DataFrame, cfg: Config, style_map: pd.DataFrame | None = None) 
     tm = team_match_table(pm)
     if style_map is None:
         _, style_map = fit_style_clusters(tm, f["opponent_style_clusters"])
+    # style of the OPPONENT: join opp_style on (match_id, opponent) so each player row
+    # gets exactly one row (joining on match_id alone duplicates across both teams).
     opp_style = (tm[["match_id", "team"]].merge(style_map, left_on="team", right_index=True, how="left")
                  .rename(columns={"team": "opponent", "style": "opp_style"}))
-    pm = pm.merge(opp_style, on=["match_id"], how="left", suffixes=("", "_y"))
+    pm = pm.merge(opp_style, on=["match_id", "opponent"], how="left")
     pm["opp_style"] = pm["opp_style"].fillna(-1).astype(int)
 
     # team possession context as-of (carried from tm, then shifted per team below)

@@ -60,7 +60,7 @@ model:
   backend: pymc                 # pymc | numpyro ; the hierarchical NB lives in rate_model.py
   draws: 1000
   tune: 1000
-  chains: 4
+  chains: 2
   target_accept: 0.9
   seed: 20260626
   # challenger (optional), selected only if it wins on out-of-sample CRPS

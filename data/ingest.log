@@ -1,0 +1,33 @@
+/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/statsbombpy/api_client.py:21: NoAuthWarning: credentials were not supplied. open data access only
+  warnings.warn(
+/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/statsbombpy/api_client.py:21: NoAuthWarning: credentials were not supplied. open data access only
+  warnings.warn(
+/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/statsbombpy/api_client.py:21: NoAuthWarning: credentials were not supplied. open data access only
+  warnings.warn(
+/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/statsbombpy/api_client.py:21: NoAuthWarning: credentials were not supplied. open data access only
+  warnings.warn(
+/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/statsbombpy/api_client.py:21: NoAuthWarning: credentials were not supplied. open data access only
+  warnings.warn(
+/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/statsbombpy/api_client.py:21: NoAuthWarning: credentials were not supplied. open data access only
+  warnings.warn(
+[06/26/26 00:33:06] INFO     No custom team name replacements      _config.py:92
+                             found. You can configure these in                  
+                             /Users/mihirepel/soccerdata/config/te              
+                             amname_replacements.json.                          
+                    INFO     No custom league dict found. You can _config.py:190
+                             configure additional leagues in                    
+                             /Users/mihirepel/soccerdata/config/l               
+                             eague_dict.json.                                   
+[corpus] FBref skipped: 
+                        Invalid league 'Intl Friendlies'. Valid leagues are:
+                        ['Big 5 European Leagues Combined',
+ 'ENG-Premier League',
+ 'ESP-La Liga',
+ 'FRA-Ligue 1',
+ 'GER-Bundesliga',
+ 'INT-European Championship',
+ "INT-Women's World Cup",
+ 'INT-World Cup',
+ 'ITA-Serie A']
+                        
+Ingested 9560 player-match rows across 314 matches, 6 competitions.
