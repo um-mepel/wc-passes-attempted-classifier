@@ -19,8 +19,10 @@ import pandas as pd
 from .config import Config
 
 # All as-of-date (computed from strictly earlier matches) — no current-match leakage.
+# team_elo/opp_elo (ESPN results) + *_poss_espn (ESPN possession) give opponent
+# strength/possession context for ANY nation, incl. those absent from StatsBomb.
 _FEATURES = ["recent_per90", "style_per90_recencybiased", "team_poss_asof",
-             "opp_allowed_asof"]
+             "opp_allowed_asof", "team_elo", "opp_elo", "team_poss_espn", "opp_poss_espn"]
 
 
 def _index(series: pd.Series) -> tuple[np.ndarray, list]:

@@ -118,7 +118,24 @@ def build(pm: pd.DataFrame, cfg: Config, style_map: pd.DataFrame | None = None) 
     pm["style_per90_recencybiased"] = style_rate
     # fallbacks for cold-start: role/position mean is filled downstream by the model's pooling
     pm["role"] = pm["position"].map(_role_bucket).fillna("UNK")
+
+    # ESPN as-of-date team strength (Elo) + possession, joined for EVERY team incl.
+    # opponents not in StatsBomb (e.g. Norway). Leakage-safe (only pre-date matches).
+    pm = _attach_espn(pm, cfg)
     return pm
+
+
+def _attach_espn(pm: pd.DataFrame, cfg: Config) -> pd.DataFrame:
+    cols = ["team_elo", "opp_elo", "team_poss_espn", "opp_poss_espn"]
+    try:
+        from .team_ratings import attach
+        results = pd.read_parquet(cfg.path("raw") / "espn_results.parquet")
+        poss = pd.read_parquet(cfg.path("raw") / "espn_team_match.parquet")
+        return attach(pm, results, poss)
+    except (FileNotFoundError, OSError):
+        for c in cols:                       # ESPN data not present (e.g. unit tests)
+            pm[c] = 1500.0 if c.endswith("elo") else np.nan
+        return pm
 
 
 def _role_bucket(pos) -> str:
