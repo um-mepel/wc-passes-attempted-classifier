@@ -41,6 +41,32 @@ def _norm(s):
     return "".join(c for c in unicodedata.normalize("NFD", str(s)) if unicodedata.category(c) != "Mn").lower()
 
 
+# ESPN displayName -> StatsBomb team name where they differ
+_ESPN_FIX = {"Cape Verde": "Cabo Verde", "USA": "United States", "Korea Republic": "South Korea"}
+
+
+def get_fixtures() -> dict:
+    """Today's team -> opponent map from ESPN (so the opponent is the real fixture,
+    not inferred from which teams happen to have props)."""
+    req = urllib.request.Request("https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard",
+                                 headers={"User-Agent": UA, "Accept-Encoding": "gzip"})
+    import gzip
+    raw = urllib.request.urlopen(req, timeout=20, context=_SSL).read()
+    try:
+        raw = gzip.decompress(raw)
+    except Exception:
+        pass
+    d = json.loads(raw)
+    fx = {}
+    for e in d.get("events", []):
+        cs = e.get("competitions", [{}])[0].get("competitors", [])
+        if len(cs) == 2:
+            a = _ESPN_FIX.get(cs[0]["team"]["displayName"], cs[0]["team"]["displayName"])
+            b = _ESPN_FIX.get(cs[1]["team"]["displayName"], cs[1]["team"]["displayName"])
+            fx[a], fx[b] = b, a
+    return fx
+
+
 def pull_passes_lines() -> pd.DataFrame:
     req = urllib.request.Request("https://api.underdogfantasy.com/beta/v5/over_under_lines",
                                  headers={"User-Agent": UA})
@@ -59,13 +85,10 @@ def pull_passes_lines() -> pd.DataFrame:
                      "team": CC.get(cc, cc), "line": float(o["stat_value"]),
                      "match_id": appr.get("match_id")})
     df = pd.DataFrame(rows)
-    # opponent = the other team sharing the same Underdog match_id
-    opp = {}
-    for mid, g in df.groupby("match_id"):
-        teams = list(dict.fromkeys(g.team))
-        for t in teams:
-            opp[(mid, t)] = next((x for x in teams if x != t), "_OPP_")
-    df["opponent"] = [opp.get((m, t), "_OPP_") for m, t in zip(df.match_id, df.team)]
+    # opponent = the real fixture from ESPN (NOT inferred from co-occurring props,
+    # which breaks when the opponent's players have no props posted).
+    fx = get_fixtures()
+    df["opponent"] = df["team"].map(lambda t: fx.get(t, "_OPP_"))
     return df
 
 
@@ -104,6 +127,7 @@ def score(up: pd.DataFrame) -> pd.DataFrame:
     """Confidence: model & history agree on side, large edge, real history."""
     up = up.copy()
     up["pick"] = np.where(up["p_over"] >= 0.5, "OVER", "UNDER")
+    up["p_hit"] = np.where(up["pick"] == "OVER", up["p_over"], 1 - up["p_over"])  # model P(pick wins)
     up["model_edge"] = np.abs(up["p_over"] - 0.5)                  # 0..0.5
     hist_over = up["hist"] > up["line"]
     up["agree"] = (hist_over == (up["pick"] == "OVER")) | up["hist"].isna()
@@ -125,28 +149,28 @@ def passes_corr(pm, pid_a, pid_b, min_co=5, default=0.6) -> float:
     return float(c) if not np.isnan(c) else default
 
 
-def pick_parlay(pm, up, n=3, corr_cap=0.35):
-    """Greedy by confidence. Different teams -> independent, always fine. Same team ->
-    allowed ONLY if same pick direction AND genuinely low passes correlation; opposite
-    directions on a team are a hedge (anti-correlated outcomes), never a parlay leg."""
-    cand = up.sort_values("confidence", ascending=False)
-    legs = []
-    for r in cand.itertuples(index=False):
-        if r.confidence <= 0:
-            continue
-        ok = True
-        for L in legs:
-            if r.team != L.team:
-                continue                                   # different team -> independent
-            if r.pick != L.pick:                           # opposite direction, same team
-                ok = False; break                          #   -> hedge, exclude
-            if passes_corr(pm, r.player_id, L.player_id) > corr_cap:
-                ok = False; break                          # same dir but too correlated
-        if ok:
+def build_parlays(up, n_parlays=2, legs_per=3, used=None):
+    """Best 1-2 three-leg parlays across the WHOLE slate. Same-team players ARE allowed
+    (legs can span games/slots), but: a player is never used twice across all parlays,
+    and opposite-direction same-team legs (a hedge) are never combined in one parlay."""
+    used = set(used or [])
+    cand = up[up.confidence > 0].sort_values("confidence", ascending=False)
+    parlays = []
+    for _ in range(n_parlays):
+        legs = []
+        for r in cand.itertuples(index=False):
+            if r.player_id in used or r.player_id in [L.player_id for L in legs]:
+                continue
+            if any(L.team == r.team and L.pick != r.pick for L in legs):  # hedge within parlay
+                continue
             legs.append(r)
-        if len(legs) == n:
-            break
-    return legs
+            if len(legs) == legs_per:
+                break
+        if len(legs) < legs_per:
+            break                                      # not enough fresh legs for another parlay
+        parlays.append(legs)
+        used.update(L.player_id for L in legs)
+    return parlays
 
 
 def main():
@@ -161,15 +185,30 @@ def main():
     for r in up.itertuples(index=False):
         h = f"{r.hist:.0f}" if not np.isnan(r.hist) else "n/a"
         flag = " [new cap-LOW TRUST]" if r.is_new else (" [model/hist disagree]" if not r.agree else "")
-        print(f"  {r.team:8} {r.player[:22]:22} {r.pick} {r.line:5.1f}  (model {r.pred:4.1f}, hist {h:>3}, conf {r.confidence:.2f}){flag}")
-    legs = pick_parlay(pm, up, n=3, corr_cap=0.5)
-    print(f"\n=== recommended {len(legs)}-leg parlay (correlation-capped, not just 1/team) ===")
-    for r in legs:
-        same = [L.player for L in legs if L.team == r.team and L.player != r.player]
-        note = f"  [same team as {same[0][:14]} but low corr]" if same else ""
-        print(f"  {r.pick} {r.player} {r.line} passes  ({r.team}){note}")
-    if len(legs) < 3:
-        print(f"  ...only {len(legs)} uncorrelated +EV leg(s) available now — re-run when later games post lines.")
+        print(f"  {r.team:8} {r.player[:22]:22} {r.pick} {r.line:5.1f}  (model {r.pred:4.1f}, hist {h:>3}, "
+              f"P(hit) {r.p_hit:.0%}, conf {r.confidence:.2f}){flag}")
+    parlays = build_parlays(up, n_parlays=2, legs_per=3)
+    if not parlays:
+        n = int((up.confidence > 0).sum())
+        print(f"\nNo full 3-leg parlay yet — only {n} confident leg(s) live (props for later games not posted).")
+        return
+    mult = {2: 3.0, 3: 6.0, 4: 10.0, 5: 20.0}            # Underdog Standard payouts
+    print(f"\n=== best {len(parlays)} three-leg parlay(s) for the rest of the day ===")
+    for i, legs in enumerate(parlays, 1):
+        p_each = [L.p_hit for L in legs]
+        p_parlay = float(np.prod(p_each))               # independence assumption
+        M = mult.get(len(legs), 0)
+        ev = p_parlay * M - 1                            # per $1 staked
+        breakeven = (1 / M) ** (1 / len(legs))           # per-leg P needed
+        same_team = len({L.team for L in legs}) < len(legs)
+        print(f"\nParlay {i}  ({len(legs)} legs, pays {M:g}x):")
+        for r in legs:
+            h = f"{r.hist:.0f}" if not np.isnan(r.hist) else "n/a"
+            print(f"   {r.pick:5} {r.player[:24]:24} {r.line:5.1f}  ({r.team}, model {r.pred:.0f}, hist {h}, P(hit) {r.p_hit:.0%})")
+        print(f"   -> P(all hit) {p_parlay:.1%}  x {M:g}  =  EV {ev:+.1%} per $1   (need {breakeven:.0%}/leg to break even)")
+        if same_team:
+            print(f"      NOTE: same-team legs are POSITIVELY correlated -> true P(all hit) is higher than the")
+            print(f"      independent {p_parlay:.0%} if they move together (and lower variance the other way).")
 
 
 if __name__ == "__main__":
