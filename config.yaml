@@ -1,0 +1,74 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# wc-passes-model configuration
+#
+# This is the ONLY file you edit to retrain on new data.
+#   • Add a new tournament  -> add a line under `statsbomb.competitions`
+#   • Add friendlies/quals  -> add a line under `fbref.competitions`
+#   • Re-run `python -m src.cli retrain` and the pipeline pulls only what's new.
+#
+# Find StatsBomb competition_id / season_id values with:
+#   python -m src.cli list-competitions
+# ─────────────────────────────────────────────────────────────────────────────
+
+paths:
+  raw: data/raw                 # cached per-match JSON/parquet (incremental, never re-pulled)
+  processed: data/processed     # built feature tables
+  models: models                # fitted model artifacts
+
+# Event-level pass data (the TARGET label comes from here). Men's international
+# tournaments only — this is the national-team training corpus.
+statsbomb:
+  # name is free-text; competition_id + season_id are what's pulled.
+  competitions:
+    - {name: "World Cup 2022",     competition_id: 43,  season_id: 106, provider: statsbomb, has_360: true}
+    - {name: "World Cup 2018",     competition_id: 43,  season_id: 3,   provider: statsbomb, has_360: false}
+    - {name: "Euro 2024",          competition_id: 55,  season_id: 282, provider: statsbomb, has_360: true}
+    - {name: "Euro 2020",          competition_id: 55,  season_id: 43,  provider: statsbomb, has_360: true}
+    - {name: "Copa America 2024",  competition_id: 223, season_id: 282, provider: statsbomb, has_360: false}
+    - {name: "AFCON 2023",         competition_id: 1267, season_id: 107, provider: statsbomb, has_360: true}
+  # NOTE: season_ids above are filled in by `list-competitions` — verify on first run.
+  sb_cores: 4                   # parallelism for bulk pulls (SB_CORES env var)
+
+# Form / minutes / lineups for friendlies + qualifiers. Post-2026-01-20 FBref no
+# longer serves per-player PASSING, so these feed the minutes & recency features,
+# NOT the pass label, unless `passing_available` is flipped on (paid feed mirror).
+fbref:
+  enabled: true
+  rate_limit_seconds: 5         # respect FBref ~10 req/min
+  passing_available: false      # set true only if you have a feed with pass counts
+  competitions:
+    - {name: "Intl Friendlies",          fbref_comp_id: 218, provider: opta}
+    - {name: "WCQ UEFA",                 fbref_comp_id: 685, provider: opta}
+    - {name: "WCQ CONMEBOL",             fbref_comp_id: 4,   provider: opta}
+    - {name: "WCQ CONCACAF",             fbref_comp_id: 5,   provider: opta}
+    # add other confederation qualifier comp ids as needed
+
+# Underdog pick'em lines for backtesting & live edge.
+underdog:
+  enabled: true
+  lines_csv: data/raw/underdog_lines.csv   # appended to daily; columns documented in ingest_underdog.py
+  stat_name: "Passes"
+
+features:
+  recency_halflife_matches: 5            # exponential decay for player overall recent rate
+  opponent_style_clusters: 4             # high-press / mid-block / low-block / direct
+  style_recency_halflife_matches: 4      # recency decay for player-vs-STYLE rate (recency-biased)
+  use_360_ball_depth: true               # only applied where has_360 is true
+  min_minutes_for_label: 1               # rows with 0 minutes are DNPs (handled by minutes model)
+
+model:
+  backend: pymc                 # pymc | numpyro ; the hierarchical NB lives in rate_model.py
+  draws: 1000
+  tune: 1000
+  chains: 4
+  target_accept: 0.9
+  seed: 20260626
+  # challenger (optional), selected only if it wins on out-of-sample CRPS
+  challenger:
+    enabled: false
+    kind: lightgbmlss_nb
+
+backtest:
+  scheme: walk_forward          # train on past tournaments, test on the next
+  min_plays_warn: 50            # warn if ROI rests on fewer plays than this
+  recalibrate: isotonic

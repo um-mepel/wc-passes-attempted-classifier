@@ -1,0 +1,47 @@
+# ── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# ── Virtual envs ────────────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Test / cache ────────────────────────────────────────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ── Data (large / pulled, never commit) ─────────────────────────────────────
+data/raw/
+data/processed/
+*.parquet
+*.nc
+
+# ── Trained model artifacts ─────────────────────────────────────────────────
+models/
+*.pkl
+
+# keep empty dirs so the pipeline can write into them (negation must come AFTER ignores)
+!**/.gitkeep
+
+# ── Underdog lines (private/collected) ──────────────────────────────────────
+data/raw/underdog_lines.csv
+
+# ── Notebooks scratch ───────────────────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ── OS / editor ─────────────────────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp

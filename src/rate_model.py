@@ -1,0 +1,138 @@
+"""Stage-2: hierarchical Bayesian Negative-Binomial passing-rate model (PyMC).
+
+passes ~ NegBinomial(mu, alpha)
+log(mu) = log(minutes) + a_player + b_role + s_player_style + g·X + t_competition + p_provider
+
+Partial pooling: a_player ~ N(a_role, σ_p); s_player_style ~ N(s_role_style, σ_s).
+The posterior predictive (sampled in predict.py) is what prices Underdog over/unders.
+
+Retraining is one call: HierNB(cfg).fit(features_df). New players/teams just appear
+as new factor levels; nothing else changes.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+from .config import Config
+
+_FEATURES = ["recent_per90", "style_per90_recencybiased", "possession_share",
+             "opp_passes_allowed"]
+
+
+def _index(series: pd.Series) -> tuple[np.ndarray, list]:
+    cats = series.astype("category")
+    return cats.cat.codes.values, list(cats.cat.categories)
+
+
+class HierNB:
+    def __init__(self, cfg: Config):
+        self.cfg = cfg
+        self.m = cfg["model"]
+        self.idata = None
+        self.levels: dict = {}
+
+    def _design(self, df: pd.DataFrame, training: bool):
+        """Map categorical levels to integer codes, remembering training levels so
+        unseen test levels fall back to the pooled group mean (code = -1 handled in model)."""
+        out = {}
+        for col in ["player_id", "role", "position", "competition", "provider"]:
+            if training:
+                codes, cats = _index(df[col])
+                self.levels[col] = cats
+            else:
+                cats = self.levels[col]
+                codes = df[col].map({c: i for i, c in enumerate(cats)}).fillna(-1).astype(int).values
+            out[col] = codes
+        # player×style key
+        df = df.copy()
+        df["pstyle"] = df["player_id"].astype(str) + "|" + df["opp_style"].astype(str)
+        if training:
+            codes, cats = _index(df["pstyle"]); self.levels["pstyle"] = cats
+        else:
+            cats = self.levels["pstyle"]
+            codes = df["pstyle"].map({c: i for i, c in enumerate(cats)}).fillna(-1).astype(int).values
+        out["pstyle"] = codes
+        X = df[_FEATURES].fillna(df[_FEATURES].median(numeric_only=True)).fillna(0).values
+        X = (X - X.mean(0)) / (X.std(0) + 1e-9)
+        out["X"] = X
+        out["minutes"] = df["minutes"].clip(lower=1).values
+        out["y"] = df["passes_attempted"].values if "passes_attempted" in df else None
+        return out
+
+    def fit(self, df: pd.DataFrame) -> "HierNB":
+        import pymc as pm
+
+        d = self._design(df, training=True)
+        n_player = len(self.levels["player_id"])
+        n_role = max(1, len(self.levels["role"]))
+        n_pos = max(1, len(self.levels["position"]))
+        n_comp = len(self.levels["competition"])
+        n_prov = max(1, len(self.levels["provider"]))
+        n_pstyle = len(self.levels["pstyle"])
+        nfx = d["X"].shape[1]
+
+        with pm.Model() as model:
+            # role-level means (players pool toward these)
+            mu = pm.Normal("mu", 3.5, 1.0)                       # ~log(33) global baseline rate
+            sigma_role = pm.HalfNormal("sigma_role", 0.5)
+            a_role = pm.Normal("a_role", mu, sigma_role, shape=n_role)
+            sigma_player = pm.HalfNormal("sigma_player", 0.5)
+            a_player = pm.Normal("a_player", 0.0, sigma_player, shape=n_player)
+
+            # granular position effect (finer than role), partially pooled toward 0
+            sigma_pos = pm.HalfNormal("sigma_pos", 0.4)
+            b_position = pm.Normal("b_position", 0.0, sigma_pos, shape=n_pos)
+
+            sigma_pstyle = pm.HalfNormal("sigma_pstyle", 0.3)
+            s_pstyle = pm.Normal("s_pstyle", 0.0, sigma_pstyle, shape=n_pstyle)
+
+            t_comp = pm.Normal("t_comp", 0.0, 0.3, shape=n_comp)
+            p_prov = pm.Normal("p_prov", 0.0, 0.3, shape=n_prov)
+            beta = pm.Normal("beta", 0.0, 0.5, shape=nfx)
+            alpha = pm.Exponential("alpha", 1.0)                 # NB dispersion
+
+            def gather(arr, idx, fill=0.0):
+                safe = np.where(idx < 0, 0, idx)
+                val = arr[safe]
+                return pm.math.switch(idx < 0, fill, val)
+
+            log_mu = (
+                np.log(d["minutes"])
+                + a_role[np.where(d["role"] < 0, 0, d["role"])]
+                + gather(b_position, d["position"])
+                + gather(a_player, d["player_id"])
+                + gather(s_pstyle, d["pstyle"])
+                + t_comp[np.where(d["competition"] < 0, 0, d["competition"])]
+                + gather(p_prov, d["provider"])
+                + pm.math.dot(d["X"], beta)
+            )
+            pm.NegativeBinomial("y", mu=pm.math.exp(log_mu), alpha=alpha, observed=d["y"])
+
+            self.idata = pm.sample(
+                draws=self.m["draws"], tune=self.m["tune"], chains=self.m["chains"],
+                target_accept=self.m["target_accept"], random_seed=self.m["seed"],
+                progressbar=True,
+            )
+        self._model = model
+        return self
+
+    def save(self, path: str | Path) -> None:
+        import arviz as az
+        import pickle
+        path = Path(path); path.mkdir(parents=True, exist_ok=True)
+        az.to_netcdf(self.idata, path / "posterior.nc")
+        with open(path / "levels.pkl", "wb") as fh:
+            pickle.dump(self.levels, fh)
+
+    @classmethod
+    def load(cls, cfg: Config, path: str | Path) -> "HierNB":
+        import arviz as az
+        import pickle
+        obj = cls(cfg)
+        obj.idata = az.from_netcdf(Path(path) / "posterior.nc")
+        with open(Path(path) / "levels.pkl", "rb") as fh:
+            obj.levels = pickle.load(fh)
+        return obj

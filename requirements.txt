@@ -1,0 +1,18 @@
+# core
+pandas>=2.0
+numpy>=1.24
+pyyaml>=6.0
+pyarrow>=14.0          # parquet caching
+
+# data sources
+statsbombpy>=1.11      # free StatsBomb open data (no auth)
+soccerdata>=1.8        # FBref friendlies/qualifiers minutes & lineups
+
+# modeling (Bayesian hierarchical NB)
+pymc>=5.10
+arviz>=0.17
+scikit-learn>=1.3      # isotonic calibration, clustering for opponent style
+
+# optional challenger / utilities
+# lightgbmlss            # distributional GBM challenger (uncomment if used)
+# ngboost
