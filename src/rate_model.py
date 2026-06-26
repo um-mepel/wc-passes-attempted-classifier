@@ -114,8 +114,12 @@ class HierNB:
             sigma_role = pm.HalfNormal("sigma_role", 0.5)
             a_role = pm.Deterministic("a_role", mu + pm.Normal("a_role_z", 0, 1, shape=n_role) * sigma_role)
 
-            sigma_player = pm.HalfNormal("sigma_player", 0.5)
-            a_player = pm.Deterministic("a_player", pm.Normal("a_player_z", 0, 1, shape=n_player) * sigma_player)
+            # Looser, heavier-tailed (Student-t) player effects so genuinely elite
+            # passers (e.g. top-side CBs/DMs) keep their own level instead of being
+            # over-shrunk to the role mean. A single tight Normal sigma_player was
+            # estimated small by the ~2k low-data players and lowballed the stars.
+            sigma_player = pm.HalfNormal("sigma_player", 1.0)
+            a_player = pm.Deterministic("a_player", pm.StudentT("a_player_z", nu=4, mu=0, sigma=1, shape=n_player) * sigma_player)
 
             # granular position effect (finer than role), partially pooled toward 0
             sigma_pos = pm.HalfNormal("sigma_pos", 0.4)
