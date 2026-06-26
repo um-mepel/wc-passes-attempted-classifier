@@ -87,14 +87,17 @@ def predict(cfg, pm, props) -> pd.DataFrame:
     up = pd.DataFrame(rows)
     feats = build(pd.concat([pm, up.drop(columns=["line", "hist", "is_new"])], ignore_index=True), cfg,
                   style_map=fit_style_clusters(team_match_table(pm), cfg["features"]["opponent_style_clusters"])[1])
+    # build() re-sorts rows, so work in fu's order and merge line/hist back by player_id —
+    # never assign predictions positionally onto `up` (that scrambles player<->prediction).
     fu = feats[feats.match_id == 9500000].copy().reset_index(drop=True)
     model = HierNB.load(cfg, cfg.path("models") / "hiernb")
     s = posterior_predictive(model, MinutesModel().fit(pm[pm.minutes > 0]), fu,
                              np.full(len(fu), 1.0), n_draws=1000, use_actual_minutes=True, seed=1)
-    summ = summarize(s)
-    up["pred"] = summ.pred.values
-    up["p_over"] = prob_over(s, up["line"].values)
-    return up
+    fu = fu.merge(up[["player_id", "line", "hist", "is_new"]].drop_duplicates("player_id"),
+                  on="player_id", how="left")
+    fu["pred"] = summarize(s).pred.values
+    fu["p_over"] = prob_over(s, fu["line"].values)
+    return fu
 
 
 def score(up: pd.DataFrame) -> pd.DataFrame:
