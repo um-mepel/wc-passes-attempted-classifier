@@ -18,8 +18,9 @@ import pandas as pd
 
 from .config import Config
 
-_FEATURES = ["recent_per90", "style_per90_recencybiased", "possession_share",
-             "opp_passes_allowed"]
+# All as-of-date (computed from strictly earlier matches) — no current-match leakage.
+_FEATURES = ["recent_per90", "style_per90_recencybiased", "team_poss_asof",
+             "opp_allowed_asof"]
 
 
 def _index(series: pd.Series) -> tuple[np.ndarray, list]:
@@ -55,9 +56,17 @@ class HierNB:
             cats = self.levels["pstyle"]
             codes = df["pstyle"].map({c: i for i, c in enumerate(cats)}).fillna(-1).astype(int).values
         out["pstyle"] = codes
-        X = df[_FEATURES].fillna(df[_FEATURES].median(numeric_only=True)).fillna(0).values
-        X = (X - X.mean(0)) / (X.std(0) + 1e-9)
-        out["X"] = X
+        # Standardize/impute with TRAIN statistics only — fitting the scaler on the
+        # test batch would leak the test distribution into the design matrix.
+        raw = df[_FEATURES]
+        if training:
+            self._impute = raw.median(numeric_only=True)
+            filled = raw.fillna(self._impute).fillna(0.0)
+            self._scale_mean = filled.mean(0)
+            self._scale_std = filled.std(0) + 1e-9
+        else:
+            filled = raw.fillna(self._impute).fillna(0.0)
+        out["X"] = ((filled - self._scale_mean) / self._scale_std).values
         out["minutes"] = df["minutes"].clip(lower=1).values
         out["y"] = df["passes_attempted"].values if "passes_attempted" in df else None
         return out
@@ -125,7 +134,8 @@ class HierNB:
         path = Path(path); path.mkdir(parents=True, exist_ok=True)
         az.to_netcdf(self.idata, path / "posterior.nc")
         with open(path / "levels.pkl", "wb") as fh:
-            pickle.dump(self.levels, fh)
+            pickle.dump({"levels": self.levels, "impute": self._impute,
+                         "scale_mean": self._scale_mean, "scale_std": self._scale_std}, fh)
 
     @classmethod
     def load(cls, cfg: Config, path: str | Path) -> "HierNB":
@@ -134,5 +144,7 @@ class HierNB:
         obj = cls(cfg)
         obj.idata = az.from_netcdf(Path(path) / "posterior.nc")
         with open(Path(path) / "levels.pkl", "rb") as fh:
-            obj.levels = pickle.load(fh)
+            blob = pickle.load(fh)
+        obj.levels = blob["levels"]
+        obj._impute, obj._scale_mean, obj._scale_std = blob["impute"], blob["scale_mean"], blob["scale_std"]
         return obj

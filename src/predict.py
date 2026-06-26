@@ -75,3 +75,24 @@ def prob_over(samples: np.ndarray, line: np.ndarray) -> np.ndarray:
     """P(passes ≥ ceil(line)) per row from the predictive sample."""
     thr = np.ceil(np.asarray(line))[:, None]
     return (samples >= thr).mean(axis=1)
+
+
+def summarize(samples: np.ndarray, ci: float = 0.80) -> "pd.DataFrame":
+    """Per-row point estimate + credible interval from the predictive samples.
+
+    The point estimate is the predictive MEAN (continuous, e.g. 36.2 — not an
+    integer), and the interval is the central `ci` credible band (e.g. 80% -> the
+    10th–90th percentiles), i.e. the margin of error around the prediction.
+    """
+    import pandas as pd
+    lo_q, hi_q = (1 - ci) / 2 * 100, (1 + ci) / 2 * 100
+    mean = samples.mean(axis=1)
+    lo, med, hi = np.percentile(samples, [lo_q, 50, hi_q], axis=1)
+    return pd.DataFrame({
+        "pred": np.round(mean, 1),
+        "ci_low": np.round(lo, 1),
+        "ci_high": np.round(hi, 1),
+        "moe": np.round((hi - lo) / 2, 1),       # +/- margin of error
+        "p50": med,
+        "std": np.round(samples.std(axis=1), 1),
+    })

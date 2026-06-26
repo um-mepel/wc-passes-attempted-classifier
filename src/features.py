@@ -80,9 +80,21 @@ def build(pm: pd.DataFrame, cfg: Config, style_map: pd.DataFrame | None = None) 
     pm = pm.merge(opp_style, on=["match_id", "opponent"], how="left")
     pm["opp_style"] = pm["opp_style"].fillna(-1).astype(int)
 
-    # team possession context as-of (carried from tm, then shifted per team below)
-    pm = pm.merge(tm[["match_id", "team", "possession_share", "opp_passes_allowed"]],
-                  on=["match_id", "team"], how="left")
+    # AS-OF-DATE team context — NEVER the current match. possession_share /
+    # opp_passes_allowed are realized only AFTER kickoff, so using the current
+    # match's values would leak the result. Instead use each team's expanding mean
+    # over its STRICTLY EARLIER matches (shift() drops the current row).
+    tm = tm.sort_values("match_date")
+    tm["team_poss_asof"] = (tm.groupby("team")["possession_share"]
+                            .transform(lambda s: s.shift().expanding().mean()))
+    tm["team_allowed_asof"] = (tm.groupby("team")["opp_passes_allowed"]
+                               .transform(lambda s: s.shift().expanding().mean()))
+    # player's own team possession (as-of)
+    pm = pm.merge(tm[["match_id", "team", "team_poss_asof"]], on=["match_id", "team"], how="left")
+    # opponent's historically-allowed passes (as-of) = "park factor" for the matchup
+    opp_allowed = tm[["match_id", "team", "team_allowed_asof"]].rename(
+        columns={"team": "opponent", "team_allowed_asof": "opp_allowed_asof"})
+    pm = pm.merge(opp_allowed, on=["match_id", "opponent"], how="left")
 
     hl, hl_style = f["recency_halflife_matches"], f["style_recency_halflife_matches"]
     recent_rate, style_rate = [], []

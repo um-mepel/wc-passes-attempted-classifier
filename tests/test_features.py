@@ -25,21 +25,29 @@ def test_first_appearance_has_no_history(corpus, cfg):
 def test_future_outlier_does_not_change_past_features(corpus, cfg):
     """Plant a huge outlier in each player's LAST match; earlier rows must be unchanged.
     If as-of-date were violated (row saw the future), earlier features would move."""
-    base = build(corpus, cfg)[["match_id", "player_id", "recent_per90",
-                               "style_per90_recencybiased"]]
+    cols = ["recent_per90", "style_per90_recencybiased", "team_poss_asof", "opp_allowed_asof"]
+    base = build(corpus, cfg)[["match_id", "player_id", *cols]]
 
     poisoned = corpus.copy()
     last = poisoned.sort_values("match_date").groupby("player_id").tail(1).index
     poisoned.loc[last, "passes_attempted"] = 9999
-    after = build(poisoned, cfg)[["match_id", "player_id", "recent_per90",
-                                  "style_per90_recencybiased"]]
+    after = build(poisoned, cfg)[["match_id", "player_id", *cols]]
 
     merged = base.merge(after, on=["match_id", "player_id"], suffixes=("_base", "_after"))
     # exclude the poisoned last rows themselves
     earlier = merged[~merged["match_id"].isin(poisoned.loc[last, "match_id"])]
-    for col in ["recent_per90", "style_per90_recencybiased"]:
+    for col in cols:
         b, a = earlier[f"{col}_base"].values, earlier[f"{col}_after"].values
         assert np.allclose(np.nan_to_num(b), np.nan_to_num(a)), f"{col} leaked future info"
+
+
+def test_possession_features_ignore_current_match(corpus, cfg):
+    """team_poss_asof / opp_allowed_asof must come from PRIOR matches only. A team's
+    first-ever match has no prior, so these must be NaN — proving the current match's
+    realized possession isn't used."""
+    feats = build(corpus, cfg)
+    first_per_team = feats.sort_values("match_date").groupby("team").head(1)
+    assert first_per_team["team_poss_asof"].isna().all(), "team possession used current match"
 
 
 def test_recent_rate_is_recency_weighted_not_flat_mean(corpus, cfg):

@@ -75,7 +75,7 @@ def cmd_backtest(cfg, args):
 def cmd_predict(cfg, args):
     from .features import build
     from .minutes_model import MinutesModel
-    from .predict import posterior_predictive, prob_over
+    from .predict import posterior_predictive, prob_over, summarize
     from .rate_model import HierNB
     from . import betting
 
@@ -83,17 +83,23 @@ def cmd_predict(cfg, args):
     upcoming = pd.read_csv(args.upcoming)          # rows describing tonight's player-matches
     feats = build(pd.concat([pm, upcoming], ignore_index=True), cfg)
     fu = feats[feats["match_id"].isin(upcoming["match_id"])]
+    # passes-attempted props cover the starting XI — only predict likely starters
+    if "started" in fu:
+        fu = fu[fu["started"].fillna(True)]
     model = HierNB.load(cfg, cfg.path("models") / "hiernb")
     minutes = MinutesModel(cfg["features"]["recency_halflife_matches"]).fit(pm)
     p_start = upcoming["p_start"].values if "p_start" in upcoming else \
         MinutesModel.recent_start_prob(feats, cfg["features"]["recency_halflife_matches"]).loc[fu.index].values
     samples = posterior_predictive(model, minutes, fu, p_start)
+    summ = summarize(samples).set_index(fu.index)
+    out = fu.assign(**{c: summ[c] for c in ["pred", "ci_low", "ci_high", "moe", "std"]})
+    out["interval_80"] = out.apply(lambda r: f"{r.pred} ± {r.moe}  [{r.ci_low}, {r.ci_high}]", axis=1)
     if "line" in fu:
-        edges = betting.edge_table(fu, prob_over(samples, fu["line"].values))
-        print(edges[["player", "line", "p_over", "pick", "edge"]].to_string(index=False))
+        out["p_over"] = prob_over(samples, fu["line"].values)
+        edges = betting.edge_table(out, out["p_over"].values)
+        print(edges[["player", "line", "pred", "interval_80", "p_over", "pick", "edge"]].to_string(index=False))
     else:
-        fu = fu.assign(pred_mean=samples.mean(1), pred_p50=np.median(samples, 1))
-        print(fu[["player", "pred_mean", "pred_p50"]].to_string(index=False))
+        print(out[["player", "pred", "interval_80", "std"]].to_string(index=False))
 
 
 COMMANDS = {
