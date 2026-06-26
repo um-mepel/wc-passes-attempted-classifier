@@ -162,22 +162,21 @@ class HierNB:
         return self
 
     def save(self, path: str | Path) -> None:
-        import arviz as az
+        """Persist posterior + level maps + scaler in one pickle. Pickle avoids the
+        fragile NetCDF backend chain (netCDF4/h5netcdf/h5py) — InferenceData wraps
+        xarray Datasets which pickle cleanly."""
         import pickle
         path = Path(path); path.mkdir(parents=True, exist_ok=True)
-        az.to_netcdf(self.idata, path / "posterior.nc")
-        with open(path / "levels.pkl", "wb") as fh:
-            pickle.dump({"levels": self.levels, "impute": self._impute,
+        with open(path / "model.pkl", "wb") as fh:
+            pickle.dump({"idata": self.idata, "levels": self.levels, "impute": self._impute,
                          "scale_mean": self._scale_mean, "scale_std": self._scale_std}, fh)
 
     @classmethod
     def load(cls, cfg: Config, path: str | Path) -> "HierNB":
-        import arviz as az
         import pickle
         obj = cls(cfg)
-        obj.idata = az.from_netcdf(Path(path) / "posterior.nc")
-        with open(Path(path) / "levels.pkl", "rb") as fh:
+        with open(Path(path) / "model.pkl", "rb") as fh:
             blob = pickle.load(fh)
-        obj.levels = blob["levels"]
+        obj.idata, obj.levels = blob["idata"], blob["levels"]
         obj._impute, obj._scale_mean, obj._scale_std = blob["impute"], blob["scale_mean"], blob["scale_std"]
         return obj
