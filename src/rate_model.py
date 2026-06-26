@@ -28,6 +28,28 @@ def _index(series: pd.Series) -> tuple[np.ndarray, list]:
     return cats.cat.codes.values, list(cats.cat.categories)
 
 
+def _heartbeat(total: int, every: int = 100):
+    """File-friendly progress callback for pm.sample — prints a timestamped line
+    every `every` draws (instead of PyMC's \\r bar, which doesn't log to files),
+    so a redirected log is watchable with `tail -f`."""
+    import time as _t
+    state = {"chain_t0": {}}
+
+    def cb(trace, draw):
+        i = draw.draw_idx + 1
+        if i % every and i != total:
+            return
+        c = draw.chain
+        state["chain_t0"].setdefault(c, _t.time())
+        elapsed = _t.time() - state["chain_t0"][c]
+        rate = i / elapsed if elapsed else 0
+        phase = "tune" if getattr(draw, "tuning", False) else "sample"
+        print(f"  [fit] chain {c}: {i}/{total} ({phase}) "
+              f"{rate:.1f} draws/s, {elapsed:.0f}s elapsed", flush=True)
+
+    return cb
+
+
 class HierNB:
     def __init__(self, cfg: Config):
         self.cfg = cfg
@@ -128,10 +150,12 @@ class HierNB:
             # macOS multiprocessing/Accelerate fork crash (EOFError) that kills
             # parallel chain workers; default to safe sequential sampling.
             cores = self.m.get("cores", 1)
+            total = self.m["tune"] + self.m["draws"]
             self.idata = pm.sample(
                 draws=self.m["draws"], tune=self.m["tune"], chains=self.m["chains"],
                 cores=cores, target_accept=self.m["target_accept"],
-                random_seed=self.m["seed"], progressbar=True,
+                random_seed=self.m["seed"], progressbar=False,
+                callback=_heartbeat(total, every=100),
                 **({"mp_ctx": "spawn"} if cores > 1 else {}),
             )
         self._model = model

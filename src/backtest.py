@@ -42,14 +42,19 @@ def log_loss(p: np.ndarray, y: np.ndarray, eps: float = 1e-6) -> float:
 def run(cfg: Config, pm: pd.DataFrame, lines: pd.DataFrame | None = None,
         use_actual_minutes: bool = False) -> pd.DataFrame:
     rows = []
-    for fold in walk_forward(pm, by="competition"):
+    folds = walk_forward(pm, by="competition")
+    print(f"[backtest] {len(folds)} walk-forward folds (train/test strictly separated)", flush=True)
+    for i, fold in enumerate(folds, 1):
         train, test = fold.train, fold.test
+        print(f"\n[backtest] fold {i}/{len(folds)} — hold out '{fold.name}' "
+              f"(train {len(train)} rows < {fold.cutoff.date()} | test {len(test)})", flush=True)
 
         # fit everything on TRAIN ONLY
         km_style = fit_style_clusters(team_match_table(train), cfg["features"]["opponent_style_clusters"])[1]
         feats_all = build(pd.concat([train, test]), cfg, style_map=km_style)  # as-of-date; test sees only past
-        ftrain = feats_all[feats_all["match_id"].isin(train["match_id"])]
-        ftest = feats_all[feats_all["match_id"].isin(test["match_id"])]
+        # train on all PLAYED rows; evaluate only on STARTERS (who Underdog prices)
+        ftrain = feats_all[feats_all["match_id"].isin(train["match_id"]) & (feats_all["minutes"] > 0)]
+        ftest = feats_all[feats_all["match_id"].isin(test["match_id"]) & feats_all["started"].fillna(False)]
 
         minutes = MinutesModel(cfg["features"]["recency_halflife_matches"]).fit(train)
         model = HierNB(cfg).fit(ftrain)
@@ -64,6 +69,7 @@ def run(cfg: Config, pm: pd.DataFrame, lines: pd.DataFrame | None = None,
 
         rec = {"fold": fold.name, "n_test": len(ftest), "crps": float(crps),
                "mae": float(np.abs(samples.mean(1) - y).mean())}
+        print(f"[backtest] fold {i}/{len(folds)} done — CRPS {rec['crps']:.2f}, MAE {rec['mae']:.1f}", flush=True)
 
         if lines is not None:
             merged = ftest.merge(lines, on=["match_id", "player_id"], how="inner")
