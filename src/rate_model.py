@@ -84,19 +84,23 @@ class HierNB:
         nfx = d["X"].shape[1]
 
         with pm.Model() as model:
-            # role-level means (players pool toward these)
+            # NON-CENTERED parameterization for every group effect: sample standard
+            # normals and scale by sigma. This avoids hierarchical "funnels" that make
+            # NUTS slow/divergent when groups (esp. ~5k sparse player x style levels)
+            # have few observations. Deterministic names match what predict.py reads.
             mu = pm.Normal("mu", 3.5, 1.0)                       # ~log(33) global baseline rate
             sigma_role = pm.HalfNormal("sigma_role", 0.5)
-            a_role = pm.Normal("a_role", mu, sigma_role, shape=n_role)
+            a_role = pm.Deterministic("a_role", mu + pm.Normal("a_role_z", 0, 1, shape=n_role) * sigma_role)
+
             sigma_player = pm.HalfNormal("sigma_player", 0.5)
-            a_player = pm.Normal("a_player", 0.0, sigma_player, shape=n_player)
+            a_player = pm.Deterministic("a_player", pm.Normal("a_player_z", 0, 1, shape=n_player) * sigma_player)
 
             # granular position effect (finer than role), partially pooled toward 0
             sigma_pos = pm.HalfNormal("sigma_pos", 0.4)
-            b_position = pm.Normal("b_position", 0.0, sigma_pos, shape=n_pos)
+            b_position = pm.Deterministic("b_position", pm.Normal("b_position_z", 0, 1, shape=n_pos) * sigma_pos)
 
             sigma_pstyle = pm.HalfNormal("sigma_pstyle", 0.3)
-            s_pstyle = pm.Normal("s_pstyle", 0.0, sigma_pstyle, shape=n_pstyle)
+            s_pstyle = pm.Deterministic("s_pstyle", pm.Normal("s_pstyle_z", 0, 1, shape=n_pstyle) * sigma_pstyle)
 
             t_comp = pm.Normal("t_comp", 0.0, 0.3, shape=n_comp)
             p_prov = pm.Normal("p_prov", 0.0, 0.3, shape=n_prov)
@@ -120,10 +124,15 @@ class HierNB:
             )
             pm.NegativeBinomial("y", mu=pm.math.exp(log_mu), alpha=alpha, observed=d["y"])
 
+            # cores=1 -> sample chains sequentially in-process. This avoids the
+            # macOS multiprocessing/Accelerate fork crash (EOFError) that kills
+            # parallel chain workers; default to safe sequential sampling.
+            cores = self.m.get("cores", 1)
             self.idata = pm.sample(
                 draws=self.m["draws"], tune=self.m["tune"], chains=self.m["chains"],
-                target_accept=self.m["target_accept"], random_seed=self.m["seed"],
-                progressbar=True,
+                cores=cores, target_accept=self.m["target_accept"],
+                random_seed=self.m["seed"], progressbar=True,
+                **({"mp_ctx": "spawn"} if cores > 1 else {}),
             )
         self._model = model
         return self
