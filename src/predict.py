@@ -64,7 +64,8 @@ def posterior_predictive(model: HierNB, minutes: MinutesModel, df: pd.DataFrame,
     if use_actual_minutes:
         m = np.repeat(df["minutes"].clip(lower=1).values[:, None], n_draws, axis=1)
     else:
-        m = minutes.sample_minutes(p_start, n_draws, rng)            # (rows, draws)
+        pids = df["player_id"].values if "player_id" in df else None
+        m = minutes.sample_minutes(p_start, n_draws, rng, player_ids=pids)  # (rows, draws)
     mu = np.exp(eta + np.log(np.clip(m, 1, None)))
     # NB sampling: variance = mu + mu^2/alpha  (pymc alpha convention)
     p = alpha[None, :] / (alpha[None, :] + mu)

@@ -149,10 +149,14 @@ class HierNB:
             # cores=1 -> sample chains sequentially in-process. This avoids the
             # macOS multiprocessing/Accelerate fork crash (EOFError) that kills
             # parallel chain workers; default to safe sequential sampling.
-            cores = self.m.get("cores", 1)
-            total = self.m["tune"] + self.m["draws"]
+            # env overrides let parallel jobs tune their own resource use
+            import os
+            cores = int(os.environ.get("PM_CORES", self.m.get("cores", 1)))
+            draws = int(os.environ.get("PM_DRAWS", self.m["draws"]))
+            tune = int(os.environ.get("PM_TUNE", self.m["tune"]))
+            total = tune + draws
             self.idata = pm.sample(
-                draws=self.m["draws"], tune=self.m["tune"], chains=self.m["chains"],
+                draws=draws, tune=tune, chains=self.m["chains"],
                 cores=cores, target_accept=self.m["target_accept"],
                 random_seed=self.m["seed"], progressbar=False,
                 callback=_heartbeat(total, every=100),
