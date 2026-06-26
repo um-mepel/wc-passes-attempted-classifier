@@ -61,7 +61,7 @@ model:
   draws: 500
   tune: 500
   chains: 2
-  cores: 1                      # sequential chains — avoids macOS multiprocessing crash
+  cores: 2                      # parallel chains, one per core (spawn ctx avoids macOS fork crash)
   target_accept: 0.9
   seed: 20260626
   # challenger (optional), selected only if it wins on out-of-sample CRPS
