@@ -93,34 +93,37 @@ def _match_label(match_id: int, meta: dict, cache_dir: Path) -> pd.DataFrame:
 
 
 def _minutes_from_events(events: pd.DataFrame, lineups: dict) -> pd.DataFrame:
-    """Approximate minutes played and starter flag from substitution events + lineups.
+    """Accurate minutes played + starter flag from the lineups `positions` field.
 
-    Starters = players present in the Starting XI tactics; minutes derived from
-    sub-on/off events and match length. Good enough for the stage-1 minutes model;
-    refined later if a cleaner minutes source is wired in.
+    Each lineup row carries a `positions` list with clock-time `from`/`to` and a
+    `start_reason`/`end_reason`. This gives exact minutes — including starters subbed
+    off early or sent off (the cases that matter for predicting their pass volume).
+    Only STARTERS are predicted downstream (passes-attempted props cover the XI), but
+    we keep every player so the rate model trains on all observed pass counts.
     """
+    match_end = int(events["minute"].max()) if "minute" in events.columns else 90
+
+    def clock_to_min(s):
+        if not s or not isinstance(s, str) or ":" not in s:
+            return None
+        mm, ss = s.split(":")[:2]
+        return int(mm) + int(ss) / 60.0
+
     rows = []
-    # match length (last event minute, capped sensibly)
-    match_end = int(events["minute"].max()) + 1 if "minute" in events else 90
-    starters = set()
-    for team, df in lineups.items():
+    for df in lineups.values():
         for _, r in df.iterrows():
             pid = r.get("player_id")
-            # statsbombpy lineups carry positions list with from/to; treat presence
-            # in the first position with from=='00:00' as a starter heuristic.
-            starters.add(pid)
-    subs = events[events["type"] == "Substitution"] if "type" in events else pd.DataFrame()
-
-    played = events.groupby("player_id")["minute"].agg(["min", "max"]) if "player_id" in events else pd.DataFrame()
-    for pid, row in played.iterrows():
-        on = 0 if pid in starters else int(row["min"])
-        off = match_end
-        if not subs.empty and "substitution_replacement_id" in subs.columns:
-            off_evt = subs[subs["player_id"] == pid]
-            if len(off_evt):
-                off = int(off_evt["minute"].iloc[0])
-        rows.append({"player_id": pid, "minutes": max(0, min(off, match_end) - on),
-                     "started": pid in starters})
+            positions = r.get("positions") or []
+            if not positions:                       # named in squad but never on pitch
+                rows.append({"player_id": pid, "minutes": 0, "started": False})
+                continue
+            started = any(p.get("start_reason") == "Starting XI" for p in positions)
+            on = clock_to_min(positions[0].get("from")) or 0.0
+            last_to = positions[-1].get("to")       # null => played to the final whistle
+            off = clock_to_min(last_to)
+            off = match_end if off is None else off
+            minutes = int(round(max(0.0, min(off, match_end) - on)))
+            rows.append({"player_id": pid, "minutes": minutes, "started": started})
     return pd.DataFrame(rows)
 
 
