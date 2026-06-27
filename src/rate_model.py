@@ -165,13 +165,22 @@ class HierNB:
             draws = int(os.environ.get("PM_DRAWS", self.m["draws"]))
             tune = int(os.environ.get("PM_TUNE", self.m["tune"]))
             total = tune + draws
-            self.idata = pm.sample(
-                draws=draws, tune=tune, chains=self.m["chains"],
-                cores=cores, target_accept=self.m["target_accept"],
-                random_seed=self.m["seed"], progressbar=False,
-                callback=_heartbeat(total, every=100),
-                **({"mp_ctx": "spawn"} if cores > 1 else {}),
-            )
+            common = dict(draws=draws, tune=tune, chains=self.m["chains"],
+                          target_accept=self.m["target_accept"], random_seed=self.m["seed"])
+            sampler = os.environ.get("PM_SAMPLER", self.m.get("sampler", "nutpie"))
+            try:
+                if sampler != "nutpie":
+                    raise RuntimeError("sampler!=nutpie")
+                import nutpie  # noqa: F401
+                print("[fit] sampling with nutpie (Rust NUTS)...", flush=True)
+                # nutpie parallelises chains itself; no cores/mp_ctx/heartbeat callback.
+                self.idata = pm.sample(**common, nuts_sampler="nutpie", progressbar=True)
+            except Exception as e:                          # fall back to the stock sampler
+                print(f"[fit] nutpie unavailable/failed ({type(e).__name__}: {e}); "
+                      "falling back to pymc sampler", flush=True)
+                self.idata = pm.sample(**common, cores=cores, progressbar=False,
+                                       callback=_heartbeat(total, every=100),
+                                       **({"mp_ctx": "spawn"} if cores > 1 else {}))
         self._model = model
         return self
 
