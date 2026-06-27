@@ -96,42 +96,41 @@ def build(pm: pd.DataFrame, cfg: Config, style_map: pd.DataFrame | None = None) 
         columns={"team": "opponent", "team_allowed_asof": "opp_allowed_asof"})
     pm = pm.merge(opp_allowed, on=["match_id", "opponent"], how="left")
 
-    hl, hl_style = f["recency_halflife_matches"], f["style_recency_halflife_matches"]
+    hl_style = f["style_recency_halflife_matches"]
     recent_rate, style_rate = [], []
-    # per-player history buffers
+    # per-player history: list of (per90, opp_style, competition), chronological.
     hist: dict = {}
-    hist_style: dict = {}
     for row in pm.itertuples(index=False):
         pid = row.player_id
-        # recency-weighted overall rate from PAST matches only
         h = hist.get(pid, [])
-        ages = np.arange(len(h), 0, -1)  # oldest..newest -> larger age = older
-        recent_rate.append(_ewma_asof(np.array([v for v, _ in h]), ages, hl) if h else np.nan)
+        # RECENT-RATE ANCHOR: average per90 over the player's LAST 2 TOURNAMENTS only
+        # (the 2 most-recently-appeared competitions before this match).
+        if h:
+            last2 = list(dict.fromkeys(c for _, _, c in reversed(h)))[:2]
+            vals = [v for v, _, c in h if c in last2]
+            recent_rate.append(float(np.mean(vals)) if vals else np.nan)
+        else:
+            recent_rate.append(np.nan)
         # recency-biased player×style rate from PAST matches vs THIS style only
-        hs = [v for v, s in h if s == row.opp_style]
+        hs = [v for v, sst, _ in h if sst == row.opp_style]
         ages_s = np.arange(len(hs), 0, -1)
         style_rate.append(_ewma_asof(np.array(hs), ages_s, hl_style) if hs else np.nan)
-        # append current AFTER computing (so row never sees itself)
-        hist.setdefault(pid, []).append((row.per90, row.opp_style))
+        hist.setdefault(pid, []).append((row.per90, row.opp_style, row.competition))
 
     pm["recent_per90"] = recent_rate
     pm["style_per90_recencybiased"] = style_rate
-    # fallbacks for cold-start: role/position mean is filled downstream by the model's pooling
     pm["role"] = pm["position"].map(_role_bucket).fillna("UNK")
+
+    # ANCHOR fallback for players with no last-2-tournament history (new caps):
+    # their role's mean per-90, then a global median. The model's offset uses this.
+    role_p90 = (pm.assign(p90=pm["passes_attempted"] / pm["minutes"].clip(lower=1) * 90)
+                .query("minutes > 0").groupby("role")["p90"].mean())
+    pm["anchor_per90"] = (pm["recent_per90"].fillna(pm["role"].map(role_p90))
+                          .fillna(pm["per90"].median()).clip(lower=1.0))
 
     # ESPN as-of-date team strength (Elo) + possession, joined for EVERY team incl.
     # opponents not in StatsBomb (e.g. Norway). Leakage-safe (only pre-date matches).
     pm = _attach_espn(pm, cfg)
-
-    # position-group x matchup interactions (replaces flat SoS / opp-position):
-    # group membership x SoS (opponent Elo) and x possession (own team share).
-    grp = pm["position"].apply(_pos_groups)
-    sos = pm["opp_elo"].fillna(1500.0).values
-    poss = pm["team_poss_asof"].fillna(pm["team_poss_asof"].median()).fillna(0.5).values
-    for g in _GROUPS:
-        flag = grp.apply(lambda d: d[g]).values
-        pm[f"{g}_x_sos"] = flag * sos
-        pm[f"{g}_x_poss"] = flag * poss
     return pm
 
 

@@ -18,15 +18,12 @@ import pandas as pd
 
 from .config import Config
 
-# All as-of-date (computed from strictly earlier matches) — no current-match leakage.
-# Flat SoS / opp-position replaced by position-group x matchup interactions
-# (def/wing/mid/attack) x {SoS=opp Elo, possession}, so opponent strength/possession
-# moves each position group differently (builders up in dominant games, mids starved
-# vs strong opponents). team_elo/team_poss = own-side strength/control.
-_FEATURES = (["recent_per90", "style_per90_recencybiased", "team_poss_asof",
-              "team_elo", "team_poss_espn"]
-             + [f"{g}_x_sos" for g in ("def", "wing", "mid", "attack")]
-             + [f"{g}_x_poss" for g in ("def", "wing", "mid", "attack")])
+# All as-of-date (no current-match leakage). These all correlate with pass volume and
+# stay in the model; the anchor (recent per-90) enters as a SEPARATE log term with a
+# strong prior near 1 (see fit), and the player-identity random effect is dropped since
+# the anchor supplies the per-player level.
+_FEATURES = ["style_per90_recencybiased", "team_poss_asof", "opp_allowed_asof",
+             "team_elo", "opp_elo", "team_poss_espn", "opp_poss_espn"]
 
 
 def _index(series: pd.Series) -> tuple[np.ndarray, list]:
@@ -96,6 +93,8 @@ class HierNB:
             filled = raw.fillna(self._impute).fillna(0.0)
         out["X"] = ((filled - self._scale_mean) / self._scale_std).values
         out["minutes"] = df["minutes"].clip(lower=1).values
+        # recent-rate anchor (per-90): the model's level baseline (a log-offset).
+        out["anchor"] = df.get("anchor_per90", pd.Series(30.0, index=df.index)).clip(lower=1.0).values
         out["y"] = df["passes_attempted"].values if "passes_attempted" in df else None
         return out
 
@@ -111,6 +110,31 @@ class HierNB:
         n_pstyle = len(self.levels["pstyle"])
         nfx = d["X"].shape[1]
 
+        # INFORMATIVE player-prior centers: each player's recent rate (mean per-90 over
+        # their LAST 2 TOURNAMENTS) relative to their role mean. a_player is shrunk toward
+        # THIS instead of toward 0, so elite builders keep their own level (fixes the
+        # systematic under-prediction) while new/low-data players still pool to the role.
+        _t = df.copy()
+        _t["_p90"] = _t["passes_attempted"] / _t["minutes"].clip(lower=1) * 90.0
+        _t = _t.sort_values("match_date")
+        role_mean = _t.groupby("role")["_p90"].mean()
+        glob = float(_t["_p90"].mean())
+
+        def _last2(g):
+            comps = list(dict.fromkeys(g["competition"].tolist()[::-1]))[:2]
+            return g.loc[g["competition"].isin(comps), "_p90"].mean()
+
+        pl_rate = _t.groupby("player_id").apply(_last2)
+        pl_role = _t.groupby("player_id")["role"].agg(lambda s: s.mode().iloc[0])
+        pl_n = _t.groupby("player_id").size()
+        K = 4.0   # data-count shrinkage: thin-data players pulled toward the role mean,
+        prior_dev = np.zeros(len(self.levels["player_id"]))   # high-data keep their rate
+        for i, pid in enumerate(self.levels["player_id"]):
+            rm = float(role_mean.get(pl_role.get(pid), glob))
+            pr = float(pl_rate.get(pid, glob))
+            shrink = float(pl_n.get(pid, 0)) / (float(pl_n.get(pid, 0)) + K)
+            prior_dev[i] = shrink * np.log(max(pr, 1.0) / max(rm, 1.0))
+
         with pm.Model() as model:
             # NON-CENTERED parameterization for every group effect: sample standard
             # normals and scale by sigma. This avoids hierarchical "funnels" that make
@@ -119,17 +143,15 @@ class HierNB:
             mu = pm.Normal("mu", 3.5, 1.0)                       # ~log(33) global baseline rate
             sigma_role = pm.HalfNormal("sigma_role", 0.5)
             a_role = pm.Deterministic("a_role", mu + pm.Normal("a_role_z", 0, 1, shape=n_role) * sigma_role)
-
-            # Looser, heavier-tailed (Student-t) player effects so genuinely elite
-            # passers (e.g. top-side CBs/DMs) keep their own level instead of being
-            # over-shrunk to the role mean. A single tight Normal sigma_player was
-            # estimated small by the ~2k low-data players and lowballed the stars.
-            sigma_player = pm.HalfNormal("sigma_player", 1.0)
-            a_player = pm.Deterministic("a_player", pm.StudentT("a_player_z", nu=4, mu=0, sigma=1, shape=n_player) * sigma_player)
-
-            # granular position effect (finer than role), partially pooled toward 0
             sigma_pos = pm.HalfNormal("sigma_pos", 0.4)
             b_position = pm.Deterministic("b_position", pm.Normal("b_position_z", 0, 1, shape=n_pos) * sigma_pos)
+
+            # PLAYER effect shrunk toward the player's OWN recent rate (prior_dev), not 0,
+            # so genuinely high-volume passers (top-side CBs/DMs) keep their level instead
+            # of being over-pooled to the role mean. Student-t for heavy tails.
+            sigma_player = pm.HalfNormal("sigma_player", 0.5)
+            a_player = pm.Deterministic(
+                "a_player", prior_dev + pm.StudentT("a_player_z", nu=4, mu=0, sigma=1, shape=n_player) * sigma_player)
 
             sigma_pstyle = pm.HalfNormal("sigma_pstyle", 0.3)
             s_pstyle = pm.Deterministic("s_pstyle", pm.Normal("s_pstyle_z", 0, 1, shape=n_pstyle) * sigma_pstyle)
@@ -148,7 +170,7 @@ class HierNB:
                 np.log(d["minutes"])
                 + a_role[np.where(d["role"] < 0, 0, d["role"])]
                 + gather(b_position, d["position"])
-                + gather(a_player, d["player_id"])
+                + gather(a_player, d["player_id"])           # centred on player's recent rate
                 + gather(s_pstyle, d["pstyle"])
                 + t_comp[np.where(d["competition"] < 0, 0, d["competition"])]
                 + gather(p_prov, d["provider"])

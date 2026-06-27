@@ -43,6 +43,8 @@ def _linpred_samples(model: HierNB, df: pd.DataFrame, n_draws: int, rng) -> tupl
         return out
 
     X = d["X"]                                # (n_rows, nfx)
+    # a_player already carries each player's level (prior-centred on their recent rate);
+    # unseen players (code -1) contribute 0 -> fall back to the role mean a_role.
     eta = (
         gather(a_role.T.T, np.where(d["role"] < 0, 0, d["role"]))  # role always present
         + gather(b_pos, d["position"])
