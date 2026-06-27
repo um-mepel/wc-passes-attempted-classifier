@@ -38,7 +38,13 @@ def main():
     pm = load_corpus(cfg)
     raw_p, outcome = [], []
 
+    # Skip the qualifier/friendly holdouts: training StatsBomb-only then predicting that
+    # whole universe is a scaler-range artifact, not the bet-relevant distribution. We
+    # calibrate on tournament + WC 2026 folds (what we actually bet).
+    SKIP = {"WC Qualifier", "Intl Friendly"}
     for fold in walk_forward(pm, by="competition"):
+        if fold.name in SKIP:
+            continue
         train, test = fold.train, fold.test
         km = fit_style_clusters(team_match_table(train), cfg["features"]["opponent_style_clusters"])[1]
         feats = build(pd.concat([train, test]), cfg, style_map=km)

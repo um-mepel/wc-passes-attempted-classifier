@@ -95,6 +95,12 @@ def main():
     fm = fm[fm.passes_attempted.notna() & fm.team.notna() & fm.opponent.notna()].copy()
     # one match per (date, teams): drop dup player rows
     fm = fm.drop_duplicates(["match_id", "fm_player_id"])
+    # Fotmob's "Minutes played" is occasionally wrong (e.g. 0 min w/ 74 passes), giving
+    # impossible per-90 that poisons the anchor/recency features and explodes the scaler.
+    p90 = fm.passes_attempted / fm.minutes.clip(lower=1) * 90
+    bad = (p90 > 150) | ((fm.minutes < 5) & (fm.passes_attempted > 8))
+    print(f"[clean] dropping {int(bad.sum())} rows with corrupted minutes (impossible per-90)")
+    fm = fm[~bad].copy()
 
     pm = pd.read_parquet(raw / "sb_player_match.parquet")
     idx = _build_name_index(pm)

@@ -92,7 +92,10 @@ class HierNB:
             self._scale_std = filled.std(0) + 1e-9
         else:
             filled = raw.fillna(self._impute).fillna(0.0)
-        out["X"] = ((filled - self._scale_mean) / self._scale_std).values
+        # clip standardized features to ±8 SD: guards against out-of-range test values
+        # (e.g. a StatsBomb-fit scaler meeting the wider Fotmob distribution) exploding
+        # exp(log_mu). Genuine features sit well inside this; only artifacts are capped.
+        out["X"] = np.clip((filled - self._scale_mean) / self._scale_std, -8.0, 8.0).values
         out["minutes"] = df["minutes"].clip(lower=1).values
         # recent-rate anchor (per-90): the model's level baseline (a log-offset).
         out["anchor"] = df.get("anchor_per90", pd.Series(30.0, index=df.index)).clip(lower=1.0).values
