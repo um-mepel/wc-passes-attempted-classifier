@@ -51,6 +51,14 @@ def fit_style_clusters(team_hist: pd.DataFrame, k: int) -> tuple[KMeans, pd.Data
 
 
 # ── recency-weighted as-of-date player rates ────────────────────────────────
+def load_corpus(cfg):
+    """The modeling corpus, preferring StatsBomb+Fotmob combined (live 2026 passes)
+    over StatsBomb-only. Single source of truth for every script."""
+    raw = cfg.path("raw")
+    p = raw / "combined_player_match.parquet"
+    return pd.read_parquet(p if p.exists() else raw / "sb_player_match.parquet")
+
+
 def _ewma_asof(values: np.ndarray, weights_age: np.ndarray, halflife: float) -> float:
     """Exponential recency weight over already-past observations (most recent last)."""
     if len(values) == 0:
@@ -69,6 +77,11 @@ def build(pm: pd.DataFrame, cfg: Config, style_map: pd.DataFrame | None = None) 
     f = cfg["features"]
     pm = pm.sort_values("match_date").reset_index(drop=True).copy()
     pm["per90"] = pm["passes_attempted"] / pm["minutes"].clip(lower=1) * 90
+    # match-type flags (each its own feature): friendlies are lower-intensity/rotated,
+    # qualifiers differ from finals football. 0 for StatsBomb tournaments and any row
+    # lacking the column (e.g. WC prediction rows, which are neither).
+    pm["is_friendly"] = pd.to_numeric(pm.get("is_friendly", 0), errors="coerce").fillna(0)
+    pm["is_qualifier"] = pd.to_numeric(pm.get("is_qualifier", 0), errors="coerce").fillna(0)
 
     tm = team_match_table(pm)
     if style_map is None:

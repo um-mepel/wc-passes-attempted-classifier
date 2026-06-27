@@ -85,6 +85,17 @@ class Fotmob:
     def get(self, path: str) -> dict:
         return json.loads(_raw(_BASE + path, {"x-mas": self._xmas(path)}))
 
+    def get_cached(self, path: str, cache_dir: Path, key: str) -> dict:
+        """get() with an on-disk JSON cache (finished matches never change)."""
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        f = cache_dir / f"{key}.json"
+        if f.exists():
+            return json.loads(f.read_text())
+        d = self.get(path)
+        f.write_text(json.dumps(d))
+        time.sleep(0.12)                                    # be polite on live fetches
+        return d
+
     # ---- high-level helpers -------------------------------------------------
 
     def matches_on(self, yyyymmdd: str) -> list[dict]:
@@ -133,6 +144,91 @@ class Fotmob:
                          "team": teams.get(pl.get("teamId")), "minutes": minutes,
                          "passes_attempted": attempted, "passes_completed": completed})
         return pd.DataFrame(rows)
+
+
+def _pos_from_depth(x: float | None) -> str:
+    """Coarse StatsBomb-style position from pitch depth (own goal=0 .. opp goal=1).
+    Used only for players we can't match to a StatsBomb record (their modal position
+    is better when available)."""
+    if x is None:
+        return "Center Midfield"
+    return ("Goalkeeper" if x <= 0.15 else "Center Back" if x <= 0.38
+            else "Center Midfield" if x <= 0.62 else "Center Forward")
+
+
+class FotmobTraining(Fotmob):
+    def __init__(self, cache_dir: Path | str | None = None):
+        super().__init__()
+        self.cache_dir = Path(cache_dir) if cache_dir else None
+
+    def match_training_rows(self, mid: int) -> list[dict]:
+        """Corpus-schema rows for one match: per-player passes (label) + minutes +
+        position + opponent + stage + pitch depth. International (WC/friendly/qual) only."""
+        path = f"/api/data/matchDetails?matchId={mid}"
+        md = self.get_cached(path, self.cache_dir, str(mid)) if self.cache_dir else self.get(path)
+        g = md.get("general", {}) or {}
+        league = str(g.get("leagueName", ""))
+        if "Club" in league or not any(k in league for k in ("World Cup", "Friendl", "Qualif")):
+            return []
+        is_friendly = int("Friendl" in league)
+        is_qualifier = int("Qualif" in league)        # WC Qualification leagues contain
+        comp = ("WC Qualifier" if is_qualifier         # "World Cup" too -> check qualifier
+                else "World Cup 2026" if "World Cup" in league   # FIRST so finals != quals
+                else "Intl Friendly")
+        home, away = g.get("homeTeam", {}), g.get("awayTeam", {})
+        date = pd.to_datetime(g.get("matchTimeUTCDate")).tz_localize(None) if g.get("matchTimeUTCDate") else None
+        rnd = str(g.get("leagueRoundName", "") or g.get("matchRound", ""))
+        knockout = any(k in rnd for k in ("Final", "16", "32", "Quarter", "Semi", "Knockout")) or not rnd.strip().isdigit() and "Group" not in rnd and "Stage" not in rnd
+        stage = "knockout" if knockout else "group"
+        # per-player position + depth + team/opponent, from the lineup block
+        info = {}
+        lu = md.get("content", {}).get("lineup", {}) or {}
+        for side, opp in (("homeTeam", away.get("name")), ("awayTeam", home.get("name"))):
+            t = lu.get(side, {}) or {}
+            for grp in ("starters", "subs"):
+                for p in (t.get(grp, []) or []):
+                    p = p[0] if isinstance(p, list) and p else p
+                    if not isinstance(p, dict):
+                        continue
+                    x = (p.get("horizontalLayout") or {}).get("x")
+                    info[p.get("id")] = {"team": t.get("name"), "opponent": opp,
+                                         "pos": _pos_from_depth(x), "depth": x}
+        rows = []
+        for pid, pl in (md.get("content", {}).get("playerStats", {}) or {}).items():
+            attempted = minutes = None
+            for grpd in pl.get("stats", []) or []:
+                s = grpd.get("stats", {})
+                if "Accurate passes" in s:
+                    attempted = s["Accurate passes"].get("stat", {}).get("total")
+                if "Minutes played" in s:
+                    minutes = s["Minutes played"].get("stat", {}).get("value")
+            if attempted is None:
+                continue
+            pid_i = pl.get("id", pid)
+            meta = info.get(pid_i, {})
+            rows.append({"fm_player_id": pid_i, "player": pl.get("name"),
+                         "team": meta.get("team"), "opponent": meta.get("opponent"),
+                         "position": meta.get("pos", "Center Midfield"), "depth": meta.get("depth"),
+                         "minutes": minutes, "passes_attempted": attempted, "stage": stage,
+                         "is_friendly": is_friendly, "is_qualifier": is_qualifier,
+                         "match_date": date, "match_id": mid, "competition": comp})
+        return rows
+
+    def wc_training_rows(self, dates: list[str]) -> pd.DataFrame:
+        """All finished INTERNATIONAL matches (WC + friendlies + qualifiers, not club)
+        across a list of YYYYMMDD dates. Minnow friendlies w/o per-player stats yield 0."""
+        frames = []
+        for d in dates:
+            for m in self.matches_on(d):
+                lg = str(m["league"])
+                if not m["finished"] or "Club" in lg or not any(
+                        k in lg for k in ("World Cup", "Friendl", "Qualif")):
+                    continue
+                r = self.match_training_rows(m["id"])
+                if r:
+                    frames.append(pd.DataFrame(r))
+                    print(f"[fm-train] {d} {m['home']}-{m['away']} ({lg}): {len(r)} rows", flush=True)
+        return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
 def grade_date(yyyymmdd: str, out_dir: str | Path | None = None) -> pd.DataFrame:

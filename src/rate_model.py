@@ -23,7 +23,8 @@ from .config import Config
 # strong prior near 1 (see fit), and the player-identity random effect is dropped since
 # the anchor supplies the per-player level.
 _FEATURES = ["style_per90_recencybiased", "team_poss_asof", "opp_allowed_asof",
-             "team_elo", "opp_elo", "team_poss_espn", "opp_poss_espn"]
+             "team_elo", "opp_elo", "team_poss_espn", "opp_poss_espn",
+             "is_friendly", "is_qualifier"]
 
 
 def _index(series: pd.Series) -> tuple[np.ndarray, list]:

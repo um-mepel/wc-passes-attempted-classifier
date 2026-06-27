@@ -20,7 +20,16 @@ from .config import Config
 
 
 def _load_corpus(cfg: Config) -> pd.DataFrame:
-    """Assemble the modeling corpus from cached ingests (StatsBomb label + FBref form)."""
+    """Assemble the modeling corpus. Prefers the combined StatsBomb+Fotmob corpus
+    (data/raw/combined_player_match.parquet, built by scripts/build_fotmob_corpus.py)
+    so training/calibration include live 2026 per-player passes; falls back to the
+    StatsBomb (+optional FBref) build."""
+    combined = cfg.path("raw") / "combined_player_match.parquet"
+    if combined.exists():
+        pm = pd.read_parquet(combined)
+        print(f"[corpus] using combined StatsBomb+Fotmob corpus ({len(pm)} rows, "
+              f"{(pm['provider'] == 'fotmob').sum()} Fotmob)")
+        return pm
     from .ingest_statsbomb import build_player_match as sb_pm
     pm = sb_pm(cfg)                      # incremental; pass label lives here
     # FBref friendlies/quals add minutes/form rows (no pass label unless paid feed)

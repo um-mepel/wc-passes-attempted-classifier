@@ -24,7 +24,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.config import Config
-from src.features import build, fit_style_clusters, team_match_table
+from src.features import build, fit_style_clusters, team_match_table, load_corpus
 from src.minutes_model import MinutesModel
 from src.predict import posterior_predictive, prob_over, summarize
 from src.rate_model import HierNB
@@ -33,8 +33,11 @@ _SSL = ssl.create_default_context(); _SSL.check_hostname = False; _SSL.verify_mo
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 # Underdog country code -> StatsBomb team name
 CC = {"FRA": "France", "NOR": "Norway", "ESP": "Spain", "URU": "Uruguay", "BEL": "Belgium",
-      "SEN": "Senegal", "EGY": "Egypt", "IRN": "Iran", "KSA": "Saudi Arabia",
-      "POR": "Portugal", "GER": "Germany", "ENG": "England", "NED": "Netherlands", "ARG": "Argentina"}
+      "SEN": "Senegal", "EGY": "Egypt", "IRN": "Iran", "KSA": "Saudi Arabia", "IRQ": "Iraq",
+      "POR": "Portugal", "PRT": "Portugal", "GER": "Germany", "ENG": "England", "NED": "Netherlands",
+      "ARG": "Argentina", "COL": "Colombia", "PAN": "Panama", "AUT": "Austria", "DZA": "Algeria",
+      "GHA": "Ghana", "HRV": "Croatia", "CRO": "Croatia", "ITA": "Italy", "BRA": "Brazil",
+      "URY": "Uruguay", "ESP2": "Spain", "USA": "United States", "MEX": "Mexico"}
 
 
 def _norm(s):
@@ -85,10 +88,20 @@ def pull_passes_lines() -> pd.DataFrame:
                      "team": CC.get(cc, cc), "line": float(o["stat_value"]),
                      "match_id": appr.get("match_id")})
     df = pd.DataFrame(rows)
-    # opponent = the real fixture from ESPN (NOT inferred from co-occurring props,
-    # which breaks when the opponent's players have no props posted).
-    fx = get_fixtures()
-    df["opponent"] = df["team"].map(lambda t: fx.get(t, "_OPP_"))
+    # opponent: prefer the other team sharing the Underdog match_id (works when both
+    # teams have props); fall back to today's ESPN fixture otherwise.
+    try:
+        fx = get_fixtures()
+    except Exception:
+        fx = {}
+    opp_by_match = {}
+    for mid, g in df.groupby("match_id"):
+        teams = list(dict.fromkeys(g.team))
+        if len(teams) == 2:
+            for t in teams:
+                opp_by_match[(mid, t)] = next(x for x in teams if x != t)
+    df["opponent"] = [opp_by_match.get((m, t)) or fx.get(t, "_OPP_")
+                      for m, t in zip(df.match_id, df.team)]
     return df
 
 
@@ -119,8 +132,20 @@ def predict(cfg, pm, props) -> pd.DataFrame:
     fu = fu.merge(up[["player_id", "line", "hist", "is_new"]].drop_duplicates("player_id"),
                   on="player_id", how="left")
     fu["pred"] = summarize(s).pred.values
-    fu["p_over"] = prob_over(s, fu["line"].values)
+    p_over = prob_over(s, fu["line"].values)
+    fu["p_over"] = _calibrate(cfg, p_over)        # map raw model prob -> calibrated frequency
     return fu
+
+
+def _calibrate(cfg, p_over):
+    """Apply the isotonic calibrator if it has been fit (scripts/calibrate.py)."""
+    import pickle
+    path = cfg.path("models") / "calibrator.pkl"
+    if not path.exists():
+        return p_over
+    with open(path, "rb") as fh:
+        iso = pickle.load(fh)
+    return np.clip(iso.predict(np.clip(p_over, 0, 1)), 0.0, 1.0)
 
 
 def score(up: pd.DataFrame) -> pd.DataFrame:
@@ -175,7 +200,7 @@ def build_parlays(up, n_parlays=2, legs_per=3, used=None):
 
 def main():
     cfg = Config.load()
-    pm = pd.read_parquet(cfg.path("raw") / "sb_player_match.parquet")
+    pm = load_corpus(cfg)
     props = pull_passes_lines()
     if props.empty:
         print("No passes props live right now."); return

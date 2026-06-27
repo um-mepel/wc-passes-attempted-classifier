@@ -18,7 +18,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.config import Config
-from src.features import build, fit_style_clusters, team_match_table
+from src.features import build, fit_style_clusters, team_match_table, load_corpus
 from src.minutes_model import MinutesModel
 from src.predict import posterior_predictive, summarize
 from src.rate_model import HierNB
@@ -69,7 +69,7 @@ def resolve(pm, team, label):
 
 def main():
     cfg = Config.load()
-    pm = pd.read_parquet(cfg.path("raw") / "sb_player_match.parquet")
+    pm = load_corpus(cfg)
 
     rows, report = [], []
     mid = 9_100_000
