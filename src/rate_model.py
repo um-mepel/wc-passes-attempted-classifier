@@ -18,12 +18,14 @@ import pandas as pd
 
 from .config import Config
 
-# All as-of-date (no current-match leakage). These all correlate with pass volume and
-# stay in the model; the anchor (recent per-90) enters as a SEPARATE log term with a
-# strong prior near 1 (see fit), and the player-identity random effect is dropped since
-# the anchor supplies the per-player level.
-_FEATURES = ["style_per90_recencybiased", "team_poss_asof", "opp_allowed_asof",
-             "team_elo", "opp_elo", "team_poss_espn", "opp_poss_espn",
+# All as-of-date (no current-match leakage). Possession enters as ONE own-possession
+# feature (team_poss) and ONE opponent-possession feature (opp_poss), each Fotmob-realized
+# first with ESPN / pass-proxy fallback (built in features.build). This replaces the old
+# collinear pair (team_poss_asof + team_poss_espn, r=+0.72) whose coefficients cancelled
+# and flipped the own-possession sign — see docs/MODEL_NOTES / model_fixes. The recent-rate
+# anchor sets the per-player level via the player random-effect prior (see fit).
+_FEATURES = ["style_per90_recencybiased", "team_poss", "opp_allowed_asof",
+             "team_elo", "opp_elo", "opp_poss",
              "is_friendly", "is_qualifier"]
 
 

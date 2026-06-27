@@ -1,13 +1,14 @@
-"""Pull WC 2026 per-player passes from Fotmob and merge into the training corpus.
+"""Build the training corpus with Fotmob as the PRIMARY source (StatsBomb as fallback).
 
-Our StatsBomb corpus stops at 2024 — so 2026 roles are stale (Gueye averages 38 there
-but passes 94 now) and some players are fragmented across IDs. This pulls every finished
-WC 2026 match, **consolidates each Fotmob player onto the matching StatsBomb player_id by
-name+team** (so their 2026 games attach to their history and lift the recent-rate anchor),
-and writes data/raw/combined_player_match.parquet for retraining.
+Fotmob now supplies the full international history (WC/Euro/Copa/AFCON/Asian Cup finals +
+qualifiers + Nations League + friendlies) with per-player passes ATTEMPTED, realized team
+possession, and scores. Each Fotmob player is consolidated onto the matching StatsBomb
+player_id by name+team so a player keeps one identity across sources. We then drop any
+StatsBomb row for a (player, match-date) Fotmob already covers — StatsBomb remains only
+where Fotmob has nothing — and write data/raw/combined_player_match.parquet.
 
-Run:  python3 scripts/build_fotmob_corpus.py            # pull + merge (cached)
-      python3 scripts/build_fotmob_corpus.py --refresh  # re-pull from Fotmob
+Run:  python3 scripts/build_fotmob_corpus.py            # build (uses caches)
+      python3 scripts/build_fotmob_corpus.py --refresh  # re-pull from Fotmob (incremental)
 """
 from __future__ import annotations
 
@@ -34,9 +35,18 @@ def _expand(*ranges) -> list[str]:
     return out
 
 
-# FIFA international windows (friendlies + qualifiers) through the WC — recent national-
-# team form with per-player passes that no free source gave before.
+# International windows. Fotmob is now the PRIMARY source, so we pull the full tournament
+# history (WC/Euro/Copa/AFCON/Asian Cup finals) that StatsBomb used to supply, PLUS the
+# 2025-26 friendly/qualifier/Nations-League windows for recent form. _classify_comp gates
+# which leagues are kept; club matches are dropped.
 DATES = _expand(
+    # --- historical tournament finals (replacing the StatsBomb corpus) ---
+    ("2018-06-14", "2018-07-15"),                       # World Cup 2018
+    ("2021-06-11", "2021-07-11"),                       # Euro 2020 (+ Copa America 2021)
+    ("2022-11-20", "2022-12-18"),                       # World Cup 2022
+    ("2024-01-12", "2024-02-11"),                       # AFCON 2023 + Asian Cup 2023
+    ("2024-06-14", "2024-07-15"),                       # Euro 2024 + Copa America 2024
+    # --- recent form: friendlies, WC qualifiers, Nations League, WC 2026 ---
     ("2025-03-17", "2025-03-26"), ("2025-06-02", "2025-06-11"), ("2025-09-01", "2025-09-10"),
     ("2025-10-06", "2025-10-15"), ("2025-11-10", "2025-11-20"),
     ("2026-03-23", "2026-04-01"), ("2026-06-01", "2026-06-27"))
@@ -77,7 +87,7 @@ def _resolve(idx: dict, team: str, name: str):
 def main():
     cfg = Config.load()
     raw = cfg.path("raw")
-    cache = raw / "fotmob_wc2026.parquet"
+    cache = raw / "fotmob_intl.parquet"            # full international history (was wc2026-only)
     refresh = "--refresh" in sys.argv
 
     if cache.exists() and not refresh:
@@ -92,6 +102,9 @@ def main():
         fm["is_qualifier"] = (fm["competition"] == "WC Qualifier").astype(int)
     if "is_friendly" not in fm.columns:
         fm["is_friendly"] = (fm["competition"] == "Intl Friendly").astype(int)
+    for c in ("possession_for", "goals_for", "goals_against", "is_home"):   # older caches lack these
+        if c not in fm.columns:
+            fm[c] = np.nan
     fm = fm[fm.passes_attempted.notna() & fm.team.notna() & fm.opponent.notna()].copy()
     # one match per (date, teams): drop dup player rows
     fm = fm.drop_duplicates(["match_id", "fm_player_id"])
@@ -129,18 +142,34 @@ def main():
         "match_id": fm["match_id"].astype(int) + 70_000_000, "match_date": pd.to_datetime(fm["match_date"]),
         "competition": fm["competition"], "season": fm["competition"], "provider": "fotmob",
         "has_360": False, "stage": fm["stage"], "depth": fm["depth"],
-        "is_friendly": fm["is_friendly"].astype(int), "is_qualifier": fm["is_qualifier"].astype(int)})
+        "is_friendly": fm["is_friendly"].astype(int), "is_qualifier": fm["is_qualifier"].astype(int),
+        "possession_for": fm["possession_for"], "goals_for": fm["goals_for"],
+        "goals_against": fm["goals_against"], "is_home": fm["is_home"]})
 
-    # StatsBomb rows are all competitive tournament football (never friendlies/qualifiers)
-    combined = pd.concat([pm.assign(stage="unknown", depth=np.nan, is_friendly=0, is_qualifier=0),
-                          out], ignore_index=True)
+    # Fotmob is the PRIMARY source: drop StatsBomb rows for any COMPETITION Fotmob now
+    # covers, keeping StatsBomb only for comps Fotmob genuinely lacks. Competition-level
+    # (not match/player-level) dedup is the robust choice here: sb_player_match has ~37%
+    # NULL team labels (so match keys are unreliable), and Fotmob's tournament coverage is
+    # complete — so a covered comp has no genuine StatsBomb-only gap. Comp labels match by
+    # construction (_classify_comp mirrors the StatsBomb names: 'World Cup 2022', etc.).
+    fm_comps = set(out["competition"].unique())
+    sb = pm.assign(stage="unknown", depth=np.nan, is_friendly=0, is_qualifier=0,
+                   possession_for=np.nan, goals_for=np.nan, goals_against=np.nan, is_home=np.nan)
+    sb_keep = ~sb["competition"].isin(fm_comps)
+    n_drop = int((~sb_keep).sum())
+    sb = sb[sb_keep]
+    gap = sorted(sb.competition.unique())
+    print(f"[dedup] dropped {n_drop} StatsBomb rows for comps Fotmob covers; kept {len(sb)} "
+          f"as genuine-gap fallback (comps: {gap if gap else 'none — corpus is pure Fotmob'})")
+    combined = pd.concat([sb, out], ignore_index=True)
     print(f"[type] {int(out.is_friendly.sum())} friendly rows, "
           f"{int(out.is_qualifier.sum())} qualifier rows, "
-          f"{int((out.competition == 'World Cup 2026').sum())} WC rows")
+          f"{int((out.competition == 'World Cup 2026').sum())} WC2026 rows; "
+          f"comps: {sorted(out.competition.unique())}")
     combined = combined.sort_values(["match_date", "match_id"]).reset_index(drop=True)
     cpath = raw / "combined_player_match.parquet"
     combined.to_parquet(cpath, index=False)
-    print(f"[done] wrote {len(combined)} rows ({len(pm)} StatsBomb + {len(out)} Fotmob) -> {cpath}")
+    print(f"[done] wrote {len(combined)} rows ({len(sb)} StatsBomb fallback + {len(out)} Fotmob) -> {cpath}")
     # quick peek: Gueye's recent volume now visible?
     g = combined[(combined.provider == "fotmob") & combined.player.str.contains("Gueye", case=False, na=False)]
     if len(g):

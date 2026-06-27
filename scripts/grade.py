@@ -63,8 +63,11 @@ def grade_match(fm: Fotmob, mid: int, label: str, pm, model, mins, sm, cfg) -> p
         else:
             pid = -(abs(hash(r.player)) % 10_000_000)
             pos, newcap = "Center Midfield", True
-        rows.append(dict(match_id=gmid, match_date=pd.Timestamp("2026-06-27"), competition="WC 2026",
-                         season="WC 2026", provider="statsbomb", has_360=False, team=r.team, opponent=opp,
+        # Use labels the model actually knows: the Fotmob-first model is trained with
+        # competition "World Cup 2026" and provider "fotmob" (NOT "WC 2026"/"statsbomb"),
+        # so the t_comp / p_prov effects resolve instead of falling back to 0.
+        rows.append(dict(match_id=gmid, match_date=pd.Timestamp("2026-06-27"), competition="World Cup 2026",
+                         season="World Cup 2026", provider="fotmob", has_360=False, team=r.team, opponent=opp,
                          player_id=pid, player=r.player, position=pos, minutes=float(r.minutes),
                          started=bool(r.minutes >= 45), passes_attempted=np.nan, passes_completed=np.nan))
         meta.append(dict(player=r.player, team=r.team, pos=pos, minutes=int(r.minutes),

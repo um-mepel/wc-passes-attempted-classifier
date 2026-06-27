@@ -20,6 +20,7 @@ Per-player attempted passes JSON path:
 from __future__ import annotations
 
 import base64
+import concurrent.futures as cf
 import gzip
 import hashlib
 import json
@@ -156,27 +157,116 @@ def _pos_from_depth(x: float | None) -> str:
             else "Center Midfield" if x <= 0.62 else "Center Forward")
 
 
+def _match_meta(md: dict) -> dict:
+    """Per-match score + ball possession from a Fotmob matchDetails payload.
+    Scores: header.teams[*].score (home first, away second).
+    Possession: content.stats.Periods.All, key 'BallPossesion' -> [home%, away%]."""
+    h = md.get("header", {}) or {}
+    teams = h.get("teams") or []
+    home = teams[0] if len(teams) > 0 else {}
+    away = teams[1] if len(teams) > 1 else {}
+    poss_home = poss_away = None
+    allp = (((md.get("content") or {}).get("stats") or {}).get("Periods") or {}).get("All") or {}
+    for grp in (allp.get("stats") or []):
+        for s in (grp.get("stats") or []):
+            if s.get("key") == "BallPossesion" or s.get("title") == "Ball possession":
+                vals = s.get("stats") or []
+                if len(vals) == 2:
+                    poss_home, poss_away = vals[0], vals[1]
+        if poss_home is not None:
+            break
+    return {"home_score": home.get("score"), "away_score": away.get("score"),
+            "poss_home": poss_home, "poss_away": poss_away}
+
+
+# International national-team leagues we keep (everything else — domestic clubs, club cups,
+# continental CLUB competitions — is dropped). Note: WC/Nations-League qualification match
+# via "World Cup"/"Nations League"; we deliberately DON'T key on bare "Qualif" (that would
+# also grab club Champions/Europa League qualifiers).
+_INTL_KEYS = ("World Cup", "EURO", "European Championship", "Copa America",
+              "Africa Cup of Nations", "AFCON", "Asian Cup", "Gold Cup", "Nations League", "Friendl")
+
+# This model is SENIOR MEN's passes. Youth (U15-U23 / Olympics), women's, futsal and beach
+# tournaments share the 'World Cup'/'EURO' names but are a different population — exclude them.
+_EXCLUDE_TOKENS = ("U15", "U16", "U17", "U18", "U19", "U20", "U21", "U22", "U23",
+                   "Under-", "Under ", "Women", "Womens", "Female", "Girls",
+                   "Olympic", "Futsal", "Beach")
+
+
+def _excluded_league(league: str) -> bool:
+    return any(t in str(league) for t in _EXCLUDE_TOKENS)
+
+
+def _wanted_league(league: str) -> bool:
+    """True for SENIOR MEN's international leagues (cheap pre-filter on the day listing,
+    so we never fetch matchDetails for domestic club, youth, or women's matches)."""
+    L = str(league)
+    return "Club" not in L and not _excluded_league(L) and any(k in L for k in _INTL_KEYS)
+
+
+def _classify_comp(league: str, date) -> tuple:
+    """Map a Fotmob leagueName -> (competition_label, is_friendly, is_qualifier).
+    Returns (None, 0, 0) for club/irrelevant leagues. Tournament labels are
+    edition-distinct (year-aware) so the recent-form window treats each separately and
+    they line up with the StatsBomb competition names ('World Cup 2022', 'Euro 2024', …).
+    Order matters: WC qualification contains 'World Cup'; Nations League contains
+    'Qualification' for its league phase — neither must be mistaken for the other."""
+    L = league
+    yr = date.year if date is not None else None
+    mo = date.month if date is not None else 1
+    if "Club" in L or _excluded_league(L):         # club / youth / women's / futsal etc.
+        return None, 0, 0
+    if "World Cup" in L and "Qualif" in L:
+        return "WC Qualifier", 0, 1
+    if "Nations League" in L:                       # competitive (incl. its 'Qualification' phase)
+        return "Nations League", 0, 0
+    if "World Cup" in L:                            # finals (qualifier handled above)
+        return (f"World Cup {yr}" if yr else "World Cup"), 0, 0
+    if "EURO" in L or "European Championship" in L:
+        return ("Euro 2020" if yr == 2021 else f"Euro {yr}" if yr else "Euro"), 0, 0
+    if "Copa America" in L:
+        return (f"Copa America {yr}" if yr else "Copa America"), 0, 0
+    if "Gold Cup" in L:
+        return (f"Gold Cup {yr}" if yr else "Gold Cup"), 0, 0
+    if "Africa Cup of Nations" in L or "AFCON" in L:
+        return ("AFCON 2023" if (yr == 2024 and mo <= 3) else f"AFCON {yr}" if yr else "AFCON"), 0, 0
+    if "Asian Cup" in L:
+        return ("Asian Cup 2023" if (yr == 2024 and mo <= 3) else f"Asian Cup {yr}" if yr else "Asian Cup"), 0, 0
+    if "Friendl" in L:
+        return "Intl Friendly", 1, 0
+    return None, 0, 0
+
+
 class FotmobTraining(Fotmob):
     def __init__(self, cache_dir: Path | str | None = None):
         super().__init__()
         self.cache_dir = Path(cache_dir) if cache_dir else None
 
     def match_training_rows(self, mid: int) -> list[dict]:
-        """Corpus-schema rows for one match: per-player passes (label) + minutes +
-        position + opponent + stage + pitch depth. International (WC/friendly/qual) only."""
+        """Corpus-schema rows for one match: per-player passes ATTEMPTED (label) +
+        minutes + position + opponent + stage + pitch depth + realized possession + score.
+        International only (WC finals/quals, Euro, Copa, AFCON, Asian Cup, Nations League,
+        friendlies); club matches return []. The pass label is ALWAYS attempts
+        ('Accurate passes'.stat.total) — never the accurate/.value count."""
         path = f"/api/data/matchDetails?matchId={mid}"
         md = self.get_cached(path, self.cache_dir, str(mid)) if self.cache_dir else self.get(path)
         g = md.get("general", {}) or {}
         league = str(g.get("leagueName", ""))
-        if "Club" in league or not any(k in league for k in ("World Cup", "Friendl", "Qualif")):
-            return []
-        is_friendly = int("Friendl" in league)
-        is_qualifier = int("Qualif" in league)        # WC Qualification leagues contain
-        comp = ("WC Qualifier" if is_qualifier         # "World Cup" too -> check qualifier
-                else "World Cup 2026" if "World Cup" in league   # FIRST so finals != quals
-                else "Intl Friendly")
         home, away = g.get("homeTeam", {}), g.get("awayTeam", {})
         date = pd.to_datetime(g.get("matchTimeUTCDate")).tz_localize(None) if g.get("matchTimeUTCDate") else None
+        comp, is_friendly, is_qualifier = _classify_comp(league, date)
+        if comp is None:
+            return []                                  # club / youth / women's / non-intl
+        if str(g.get("gender", "male")).lower() == "female":
+            return []                                  # senior MEN's model only
+        # realized possession (fraction) + score per team, for this match
+        mm = _match_meta(md)
+        tstat = {
+            home.get("name"): {"poss_for": mm["poss_home"] / 100.0 if mm["poss_home"] is not None else None,
+                               "goals_for": mm["home_score"], "goals_against": mm["away_score"]},
+            away.get("name"): {"poss_for": mm["poss_away"] / 100.0 if mm["poss_away"] is not None else None,
+                               "goals_for": mm["away_score"], "goals_against": mm["home_score"]},
+        }
         rnd = str(g.get("leagueRoundName", "") or g.get("matchRound", ""))
         knockout = any(k in rnd for k in ("Final", "16", "32", "Quarter", "Semi", "Knockout")) or not rnd.strip().isdigit() and "Group" not in rnd and "Stage" not in rnd
         stage = "knockout" if knockout else "group"
@@ -206,28 +296,53 @@ class FotmobTraining(Fotmob):
                 continue
             pid_i = pl.get("id", pid)
             meta = info.get(pid_i, {})
+            st = tstat.get(meta.get("team"), {})
             rows.append({"fm_player_id": pid_i, "player": pl.get("name"),
                          "team": meta.get("team"), "opponent": meta.get("opponent"),
                          "position": meta.get("pos", "Center Midfield"), "depth": meta.get("depth"),
                          "minutes": minutes, "passes_attempted": attempted, "stage": stage,
                          "is_friendly": is_friendly, "is_qualifier": is_qualifier,
-                         "match_date": date, "match_id": mid, "competition": comp})
+                         "match_date": date, "match_id": mid, "competition": comp,
+                         "possession_for": st.get("poss_for"),
+                         "goals_for": st.get("goals_for"), "goals_against": st.get("goals_against"),
+                         "is_home": int(meta.get("team") == home.get("name"))})
         return rows
 
-    def wc_training_rows(self, dates: list[str]) -> pd.DataFrame:
-        """All finished INTERNATIONAL matches (WC + friendlies + qualifiers, not club)
-        across a list of YYYYMMDD dates. Minnow friendlies w/o per-player stats yield 0."""
+    def wc_training_rows(self, dates: list[str], workers: int = 4) -> pd.DataFrame:
+        """All finished INTERNATIONAL matches (WC finals+quals, Euro, Copa, AFCON,
+        Asian Cup, Nations League, friendlies; not club) across the given YYYYMMDD dates.
+        I/O-bound, so day listings AND per-match pulls run in a thread pool; per-match
+        JSON is cached on disk, so re-runs only fetch new matches. The league filter is
+        delegated to `match_training_rows`/`_classify_comp` (returns [] for anything we
+        don't want), so the gate stays in one place."""
+        # 1) gather candidate (finished, non-club) match ids across all dates, in parallel
+        def _day(d):
+            try:
+                return [(m["id"], d, m.get("home"), m.get("away")) for m in self.matches_on(d)
+                        if m["finished"] and _wanted_league(m["league"])]
+            except Exception as e:
+                print(f"[fm-train] matches_on {d} failed: {e}", flush=True)
+                return []
+        cand: dict = {}
+        with cf.ThreadPoolExecutor(max_workers=workers) as ex:
+            for part in ex.map(_day, dates):
+                for mid, d, h, a in part:
+                    cand.setdefault(mid, (mid, d, h, a))   # dedup match ids across dates
+        print(f"[fm-train] {len(cand)} candidate finished non-club matches across {len(dates)} dates", flush=True)
+        # 2) pull per-match training rows in parallel (cached; classifier drops non-intl)
         frames = []
-        for d in dates:
-            for m in self.matches_on(d):
-                lg = str(m["league"])
-                if not m["finished"] or "Club" in lg or not any(
-                        k in lg for k in ("World Cup", "Friendl", "Qualif")):
+        with cf.ThreadPoolExecutor(max_workers=workers) as ex:
+            futs = {ex.submit(self.match_training_rows, mid): meta for mid, meta in cand.items()}
+            for fut in cf.as_completed(futs):
+                mid, d, h, a = futs[fut]
+                try:
+                    r = fut.result()
+                except Exception as e:
+                    print(f"[fm-train] match {mid} ({h}-{a}) failed: {e}", flush=True)
                     continue
-                r = self.match_training_rows(m["id"])
                 if r:
                     frames.append(pd.DataFrame(r))
-                    print(f"[fm-train] {d} {m['home']}-{m['away']} ({lg}): {len(r)} rows", flush=True)
+                    print(f"[fm-train] {d} {h}-{a} ({r[0]['competition']}): {len(r)} rows", flush=True)
         return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
