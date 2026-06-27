@@ -50,7 +50,7 @@ def _linpred_samples(model: HierNB, df: pd.DataFrame, n_draws: int, rng) -> tupl
         + gather(b_pos, d["position"])
         + gather(a_player, d["player_id"])
         + gather(s_pstyle, d["pstyle"])
-        + gather(t_comp, np.where(d["competition"] < 0, 0, d["competition"]))
+        + gather(t_comp, np.where(d["comp_effect"] < 0, 0, d["comp_effect"]))
         + gather(p_prov, d["provider"])
         + X @ beta
     )

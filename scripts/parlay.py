@@ -114,8 +114,8 @@ def predict(cfg, pm, props) -> pd.DataFrame:
         phist = pm[(pm.player_id == pid) & pm.position.notna()]
         position = phist.position.mode().iloc[0] if len(phist) else "Center Midfield"
         hist = pm.loc[(pm.player_id == pid) & (pm.minutes >= 70), "passes_attempted"]
-        rows.append(dict(match_id=9500000, match_date=pd.Timestamp("2026-06-26"), competition="WC 2026",
-                         season="WC 2026", provider="statsbomb", has_360=False, team=r.team,
+        rows.append(dict(match_id=9500000, match_date=pd.Timestamp("2026-06-27"), competition="World Cup 2026",
+                         season="World Cup 2026", provider="fotmob", has_360=False, team=r.team,
                          opponent=r.opponent, player_id=pid, player=hit[0][1] if hit else r.name,
                          position=position, minutes=90.0, started=True,
                          passes_attempted=np.nan, passes_completed=np.nan,

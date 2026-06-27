@@ -89,6 +89,14 @@ def build(pm: pd.DataFrame, cfg: Config, style_map: pd.DataFrame | None = None) 
         # pm.get returns a scalar (not a Series) when the column is absent; wrap in a
         # Series broadcast over the index so .fillna works in both cases.
         pm[_flag] = pd.to_numeric(pd.Series(pm.get(_flag, 0), index=pm.index), errors="coerce").fillna(0)
+    # Match-type CLASS for the t_comp effect: qualifiers and friendlies are their own
+    # levels, everything else is "Tournament". This is the single home for match-type — it
+    # replaces the (collinear, weak) is_friendly/is_qualifier flags AND generalises to a
+    # held-out tournament (which still maps to the seen "Tournament" class instead of
+    # collapsing to a diluted baseline). The real `competition` is kept for the recency
+    # anchor (last-2-tournaments window).
+    pm["comp_effect"] = np.where(pm["is_friendly"] == 1, "Intl Friendly",
+                                 np.where(pm["is_qualifier"] == 1, "WC Qualifier", "Tournament"))
 
     tm = team_match_table(pm)
     if style_map is None:

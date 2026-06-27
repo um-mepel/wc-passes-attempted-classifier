@@ -25,8 +25,10 @@ from .config import Config
 # and flipped the own-possession sign — see docs/MODEL_NOTES / model_fixes. The recent-rate
 # anchor sets the per-player level via the player random-effect prior (see fit).
 _FEATURES = ["style_per90_recencybiased", "team_poss", "opp_allowed_asof",
-             "team_elo", "opp_elo", "opp_poss",
-             "is_friendly", "is_qualifier"]
+             "team_elo", "opp_elo", "opp_poss"]
+# NOTE: match-type (qualifier / friendly / tournament) is NOT here — it lives in the
+# t_comp effect via the `comp_effect` class (see features.build), so it generalises to
+# held-out tournaments instead of being a collinear linear flag.
 
 
 def _index(series: pd.Series) -> tuple[np.ndarray, list]:
@@ -67,7 +69,7 @@ class HierNB:
         """Map categorical levels to integer codes, remembering training levels so
         unseen test levels fall back to the pooled group mean (code = -1 handled in model)."""
         out = {}
-        for col in ["player_id", "role", "position", "competition", "provider"]:
+        for col in ["player_id", "role", "position", "comp_effect", "provider"]:
             if training:
                 codes, cats = _index(df[col])
                 self.levels[col] = cats
@@ -111,7 +113,7 @@ class HierNB:
         n_player = len(self.levels["player_id"])
         n_role = max(1, len(self.levels["role"]))
         n_pos = max(1, len(self.levels["position"]))
-        n_comp = len(self.levels["competition"])
+        n_comp = len(self.levels["comp_effect"])
         n_prov = max(1, len(self.levels["provider"]))
         n_pstyle = len(self.levels["pstyle"])
         nfx = d["X"].shape[1]
@@ -178,7 +180,7 @@ class HierNB:
                 + gather(b_position, d["position"])
                 + gather(a_player, d["player_id"])           # centred on player's recent rate
                 + gather(s_pstyle, d["pstyle"])
-                + t_comp[np.where(d["competition"] < 0, 0, d["competition"])]
+                + t_comp[np.where(d["comp_effect"] < 0, 0, d["comp_effect"])]
                 + gather(p_prov, d["provider"])
                 + pm.math.dot(d["X"], beta)
             )

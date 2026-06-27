@@ -81,8 +81,8 @@ def main():
             for label in xi:
                 pid, name, is_new, pos = resolve(pm, team, label)
                 report.append((team, opp, name, "NEW (pooled)" if is_new else f"id {pid}"))
-                rows.append(dict(match_id=mid, match_date=pd.Timestamp(DATE), competition="WC 2026",
-                                 season="WC 2026", provider="statsbomb", has_360=False, team=team,
+                rows.append(dict(match_id=mid, match_date=pd.Timestamp(DATE), competition="World Cup 2026",
+                                 season="World Cup 2026", provider="fotmob", has_360=False, team=team,
                                  opponent=opp, player_id=pid if pid is not None else -(abs(hash(name)) % 10**8),
                                  player=name, position=_pos_name(pos), minutes=np.nan, started=True,
                                  passes_attempted=np.nan, passes_completed=np.nan, is_new=is_new))

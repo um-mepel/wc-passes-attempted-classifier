@@ -48,8 +48,8 @@ def build_upcoming(pm: pd.DataFrame, fixtures, date) -> pd.DataFrame:
         for team, opp in [(home, away), (away, home)]:
             xi = last_xi(pm, team)
             for _, p in xi.iterrows():
-                rows.append(dict(match_id=mid, match_date=pd.Timestamp(date), competition="WC 2026",
-                                 season="WC 2026", provider="statsbomb", has_360=False,
+                rows.append(dict(match_id=mid, match_date=pd.Timestamp(date), competition="World Cup 2026",
+                                 season="World Cup 2026", provider="fotmob", has_360=False,
                                  team=team, opponent=opp, player_id=p.player_id, player=p.player,
                                  position=p.position, minutes=np.nan, started=True,
                                  passes_attempted=np.nan, passes_completed=np.nan))
