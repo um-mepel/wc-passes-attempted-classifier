@@ -102,13 +102,26 @@ a_player[i]  ~ StudentT(nu=4, mu=prior_dev[i], sigma=sigma_player)
 | Theate (LB)  | 61 | **75** | (line 74.5 → flips to OVER) |
 | Tielemans    | 56 | **68** | (line 61.5 → flips to OVER) |
 
-**Caveat (resolved):** the *no-shrink* version pinned each player to their training average
-(σ_player → 0.004) and **overfit** → aggregate walk-forward CRPS regressed to **9.15** (vs 8.00).
-The **count-based shrinkage (K=4)** fixed it: aggregate CRPS back to **8.17** (folds 8.45 / 8.28 /
-8.90 / 7.05) — essentially baseline — *while keeping the builder improvement*. **Note:** aggregate
-CRPS is dominated by noisy role-fallback players we'd *never bet*; the metric that matters for us is
-CRPS on **data-backed starters**, which is exactly where the anchor helps. Net: builder bias fixed
-at ~no aggregate cost. Production retrain + recalibrate pending.
+**The honest tradeoff (K sweep).** The *no-shrink* version pinned each player to their training
+average (σ_player → 0.004) and **overfit** → aggregate CRPS **9.15**. Count-shrinkage `n/(n+K)`
+fixes the overfit but also mutes the builder lift (shrink applies to the prior center). Sweep:
+
+| | Aggregate CRPS | Rodri (act. 106) | Laporte (act. 102) |
+|---|---|---|---|
+| Old model (shrink-to-role) | **8.00** | 86 | 77 |
+| Anchor, no shrink | 9.15 (overfit) | 98 | 93 |
+| Anchor, K=4 | 8.17 | 83 | 80 |
+| **Anchor, K=2 (chosen)** | 8.32 | **90** | **86** |
+
+The anchor does **not** beat the old model on *aggregate* — its value is concentrated in
+**data-rich builders** (Laporte 77→86, n=15), at a small cost on noisy players we never bet. Two
+things matter: (1) **match count drives trust** — Theate has only **n=3** matches, so he's correctly
+shrunk toward the role mean regardless of K (thin-data players are a *qualitative-read* call, not a
+model-trust one); (2) even at full trust the model can't predict a blowout *above* a player's own
+rate (Rodri 98 < actual 106 because Spain dominated extraordinarily). **Chosen K=2**: it bakes the
+validated "builders go over" lesson into the model for the data-rich players we actually bet, at a
+~4% aggregate-CRPS cost on players we don't. `K` is the single knob (rate_model.py); raise it to
+favor aggregate accuracy, lower it to favor builder lift.
 
 ---
 

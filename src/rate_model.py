@@ -127,7 +127,7 @@ class HierNB:
         pl_rate = _t.groupby("player_id").apply(_last2)
         pl_role = _t.groupby("player_id")["role"].agg(lambda s: s.mode().iloc[0])
         pl_n = _t.groupby("player_id").size()
-        K = 4.0   # data-count shrinkage: thin-data players pulled toward the role mean,
+        K = 2.0   # data-count shrinkage: thin-data players pulled toward the role mean,
         prior_dev = np.zeros(len(self.levels["player_id"]))   # high-data keep their rate
         for i, pid in enumerate(self.levels["player_id"]):
             rm = float(role_mean.get(pl_role.get(pid), glob))
