@@ -122,6 +122,16 @@ def build(pm: pd.DataFrame, cfg: Config, style_map: pd.DataFrame | None = None) 
     # ESPN as-of-date team strength (Elo) + possession, joined for EVERY team incl.
     # opponents not in StatsBomb (e.g. Norway). Leakage-safe (only pre-date matches).
     pm = _attach_espn(pm, cfg)
+
+    # position-group x matchup interactions (replaces flat SoS / opp-position):
+    # group membership x SoS (opponent Elo) and x possession (own team share).
+    grp = pm["position"].apply(_pos_groups)
+    sos = pm["opp_elo"].fillna(1500.0).values
+    poss = pm["team_poss_asof"].fillna(pm["team_poss_asof"].median()).fillna(0.5).values
+    for g in _GROUPS:
+        flag = grp.apply(lambda d: d[g]).values
+        pm[f"{g}_x_sos"] = flag * sos
+        pm[f"{g}_x_poss"] = flag * poss
     return pm
 
 
@@ -136,6 +146,27 @@ def _attach_espn(pm: pd.DataFrame, cfg: Config) -> pd.DataFrame:
         for c in cols:                       # ESPN data not present (e.g. unit tests)
             pm[c] = 1500.0 if c.endswith("elo") else np.nan
         return pm
+
+
+_GROUPS = ["def", "wing", "mid", "attack"]
+
+
+def _pos_groups(pos) -> dict:
+    """Multi-hot position-group membership (a player can be in several):
+      def    = LB, CB, RB, DM        wing  = LB, LW, RB, RW
+      mid    = DM, CM, AM            attack= AM, LW, ST, F, RW
+    Passing volume responds to the matchup DIFFERENTLY per group (validation:
+    builders explode in dominant games, mids get starved vs strong opponents)."""
+    p = str(pos).lower()
+    back = "back" in p
+    fullback = back and "center back" not in p
+    dm = "defensive midfield" in p
+    return {
+        "def": int(back or dm),
+        "wing": int(fullback or "wing" in p),
+        "mid": int("midfield" in p),
+        "attack": int("attacking midfield" in p or "wing" in p or "forward" in p or "striker" in p),
+    }
 
 
 def _role_bucket(pos) -> str:

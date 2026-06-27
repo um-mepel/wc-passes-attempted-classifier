@@ -19,10 +19,14 @@ import pandas as pd
 from .config import Config
 
 # All as-of-date (computed from strictly earlier matches) — no current-match leakage.
-# team_elo/opp_elo (ESPN results) + *_poss_espn (ESPN possession) give opponent
-# strength/possession context for ANY nation, incl. those absent from StatsBomb.
-_FEATURES = ["recent_per90", "style_per90_recencybiased", "team_poss_asof",
-             "opp_allowed_asof", "team_elo", "opp_elo", "team_poss_espn", "opp_poss_espn"]
+# Flat SoS / opp-position replaced by position-group x matchup interactions
+# (def/wing/mid/attack) x {SoS=opp Elo, possession}, so opponent strength/possession
+# moves each position group differently (builders up in dominant games, mids starved
+# vs strong opponents). team_elo/team_poss = own-side strength/control.
+_FEATURES = (["recent_per90", "style_per90_recencybiased", "team_poss_asof",
+              "team_elo", "team_poss_espn"]
+             + [f"{g}_x_sos" for g in ("def", "wing", "mid", "attack")]
+             + [f"{g}_x_poss" for g in ("def", "wing", "mid", "attack")])
 
 
 def _index(series: pd.Series) -> tuple[np.ndarray, list]:
