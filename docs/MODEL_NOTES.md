@@ -192,7 +192,7 @@ DM, CM, FB, winger, ST) > crude DEF/MID/FWD.
 | **ESPN public JSON API** | fixtures, confirmed lineups (~1h pre-kick), team possession/passes; all-nations results → Elo. | ✅ (use unverified SSL ctx; curl `--compressed`) |
 | **Underdog API** (`/beta/v5/over_under_lines`, stat `period_1_2_passes`) | the lines we bet; **open, no auth**. | ✅ |
 | **Per-player 2026 passing** | the live-tournament gap. | ❌ no free source — FBref dropped passing (Jan 2026 Opta cut); ESPN per-player has no passes; Fotmob/Sofascore Cloudflare/DataDome-blocked |
-| **Fotmob API** (`GET fotmob.com/api/matchDetails?matchId=`) | **fills the 2026 per-player passes gap.** | ✅ **GO.** Per-player attempted passes = `content.playerStats[playerId].stats[...]["Accurate passes"].total` (value=completed, **total=attempted**). WC 2026 (league 77) + friendlies/quals covered. Confirmed XI in `content.lineup` ~60min pre-kick. Auth = self-signed `x-mas`/`x-fm-req` header (MD5 of body+lyric secret), headless-safe — **own the signing ourselves** (don't depend on a wrapper's token-server IP). Caveat: passes are **post-kickoff only** (great for grading/backfill, not a pre-match feature); ToS-gray → low rate, keep a fallback; header scheme can rotate (maintenance burden) |
+| **Fotmob API** (`GET /api/data/matchDetails?matchId=`) | **fills the 2026 per-player passes gap.** | ✅ **IMPLEMENTED** (`src/ingest_fotmob.py`). Per-player attempted passes = `content.playerStats[*].stats[...]["Accurate passes"].total`. Verified live on WC 2026 (Gueye 94 matches the hand-graded actual). **Auth cracked & self-contained:** `x-mas` header = base64({body:{url,code,foo}, signature: md5(json(body)+SECRET)}); **SECRET = the "Three Lions" lyrics** (not Rick Astley) + a `foo` build-hash, both in the `_app-*.js` bundle — we **re-extract them from the live bundle each run** so it survives rotation (the community token-server `46.101.91.154:6006` is dead; soccerdata dropped FotMob; bgrnwd predates auth). Passes are **post-kickoff only** → grading/backfill, not a pre-match feature; ToS-gray → keep rate low |
 | **Club passing** | optional separate feature for players w/o intl history. | ⏸ deferred (BACKLOG.md). Est. club↔intl passing correlation ~0.5 raw rate, ~0.7 on *share* — use share, never inject as a national rate |
 
 ---
@@ -212,10 +212,10 @@ DM, CM, FB, winger, ST) > crude DEF/MID/FWD.
 
 ## 9. Open queue (next actions)
 
-- [x] Count-shrink anchor recovers aggregate CRPS (8.17). **Next: retrain production model +
-      recalibrate, then commit as the live model.**
-- [ ] Build `ingest_fotmob.py` (self-signed `x-mas` header) → live 2026 per-player **passes
-      attempted** for grading/validation + training backfill (post-kickoff). §7.
+- [x] Anchor model (K=2) retrained + recalibrated (Brier 0.204→0.200) — **live model**.
+- [x] `ingest_fotmob.py` — live 2026 per-player **passes attempted** working (auto-extracts
+      the rotating secret). **Next: wire it into an auto-grader** (pull Fotmob actuals after each
+      slot, compare to predictions, append to the validation log) and **backfill training data**.
 - [ ] Re-ingest with `competition_stage` + scores → add knockout / qualified / eliminated
       features + dead-rubber weighting (§6.1–6.2).
 - [ ] Style window: flat 3-year cutoff now; source coaching-change dates for the full rule (§6.3).
