@@ -1,11 +1,12 @@
-"""Build the training corpus with Fotmob as the PRIMARY source (StatsBomb as fallback).
+"""Build the training corpus: StatsBomb PRIMARY, Fotmob fills the gaps.
 
-Fotmob now supplies the full international history (WC/Euro/Copa/AFCON/Asian Cup finals +
-qualifiers + Nations League + friendlies) with per-player passes ATTEMPTED, realized team
-possession, and scores. Each Fotmob player is consolidated onto the matching StatsBomb
-player_id by name+team so a player keeps one identity across sources. We then drop any
-StatsBomb row for a (player, match-date) Fotmob already covers — StatsBomb remains only
-where Fotmob has nothing — and write data/raw/combined_player_match.parquet.
+StatsBomb (hand-coded event data) is the gold standard for the tournaments it covers
+(WC 2018/2022, Euro 2020/2024, Copa America 2024, AFCON 2023). Fotmob supplies everything
+StatsBomb LACKS — WC 2026, qualifiers, friendlies, Nations League, and the extra
+tournaments — with per-player passes ATTEMPTED, realized possession, and scores. Each
+Fotmob player is consolidated onto the matching StatsBomb player_id by name+team so a
+player keeps one identity across sources; Fotmob rows for any competition StatsBomb already
+covers are dropped. Writes data/raw/combined_player_match.parquet.
 
 Run:  python3 scripts/build_fotmob_corpus.py            # build (uses caches)
       python3 scripts/build_fotmob_corpus.py --refresh  # re-pull from Fotmob (incremental)
@@ -146,21 +147,23 @@ def main():
         "possession_for": fm["possession_for"], "goals_for": fm["goals_for"],
         "goals_against": fm["goals_against"], "is_home": fm["is_home"]})
 
-    # Fotmob is the PRIMARY source: drop StatsBomb rows for any COMPETITION Fotmob now
-    # covers, keeping StatsBomb only for comps Fotmob genuinely lacks. Competition-level
-    # (not match/player-level) dedup is the robust choice here: sb_player_match has ~37%
-    # NULL team labels (so match keys are unreliable), and Fotmob's tournament coverage is
-    # complete — so a covered comp has no genuine StatsBomb-only gap. Comp labels match by
+    # StatsBomb is the PRIMARY source (gold-standard hand-coded event data — more precise
+    # pass counts, true positions, has_360). Keep ALL StatsBomb rows and use Fotmob only to
+    # FILL GAPS: competitions StatsBomb doesn't have (WC 2026, qualifiers, friendlies,
+    # Nations League, and the extra tournaments). Drop Fotmob rows for any competition
+    # StatsBomb already covers. Competition-level dedup is robust (sb_player_match has ~37%
+    # NULL team labels, so match/player keys are unreliable) and comp labels match by
     # construction (_classify_comp mirrors the StatsBomb names: 'World Cup 2022', etc.).
-    fm_comps = set(out["competition"].unique())
+    # NOTE: recency still comes from Fotmob — StatsBomb has no 2025-26 data, so the last-2-
+    # tournaments anchor for WC-2026 predictions is Fotmob-driven (staleness fix preserved).
     sb = pm.assign(stage="unknown", depth=np.nan, is_friendly=0, is_qualifier=0,
                    possession_for=np.nan, goals_for=np.nan, goals_against=np.nan, is_home=np.nan)
-    sb_keep = ~sb["competition"].isin(fm_comps)
-    n_drop = int((~sb_keep).sum())
-    sb = sb[sb_keep]
-    gap = sorted(sb.competition.unique())
-    print(f"[dedup] dropped {n_drop} StatsBomb rows for comps Fotmob covers; kept {len(sb)} "
-          f"as genuine-gap fallback (comps: {gap if gap else 'none — corpus is pure Fotmob'})")
+    sb_comps = set(sb["competition"].unique())
+    fm_keep = ~out["competition"].isin(sb_comps)
+    n_drop = int((~fm_keep).sum())
+    out = out[fm_keep]
+    print(f"[dedup] StatsBomb PRIMARY: kept {len(sb)} StatsBomb rows; dropped {n_drop} Fotmob "
+          f"rows for comps StatsBomb covers. Fotmob fills gaps: {sorted(out.competition.unique())}")
     combined = pd.concat([sb, out], ignore_index=True)
     print(f"[type] {int(out.is_friendly.sum())} friendly rows, "
           f"{int(out.is_qualifier.sum())} qualifier rows, "

@@ -20,7 +20,7 @@ from .features import build, fit_style_clusters, team_match_table
 from .minutes_model import MinutesModel
 from .predict import posterior_predictive, prob_over
 from .rate_model import HierNB
-from .splits import walk_forward
+from .splits import chunked_holdout, walk_forward
 
 
 def crps_sample(samples: np.ndarray, y: np.ndarray) -> np.ndarray:
@@ -42,8 +42,18 @@ def log_loss(p: np.ndarray, y: np.ndarray, eps: float = 1e-6) -> float:
 def run(cfg: Config, pm: pd.DataFrame, lines: pd.DataFrame | None = None,
         use_actual_minutes: bool = False) -> pd.DataFrame:
     rows = []
-    folds = walk_forward(pm, by="competition")
-    print(f"[backtest] {len(folds)} walk-forward folds (train/test strictly separated)", flush=True)
+    bt = cfg["backtest"]
+    scheme = bt.get("scheme", "walk_forward")
+    if scheme == "wc_chunked":
+        # Live-tournament backtest: base = all data before the tournament, then step through
+        # its matches in date chunks, retraining (per-fold fit below) after each chunk.
+        folds = chunked_holdout(pm, tournament=bt.get("tournament", "World Cup 2026"),
+                                chunk_days=int(bt.get("chunk_days", 1)))
+        print(f"[backtest] {len(folds)} {bt.get('tournament', 'World Cup 2026')} chunks "
+              f"(expanding window, retrain per chunk, {bt.get('chunk_days', 1)} date(s)/chunk)", flush=True)
+    else:
+        folds = walk_forward(pm, by="competition")
+        print(f"[backtest] {len(folds)} walk-forward folds (train/test strictly separated)", flush=True)
     for i, fold in enumerate(folds, 1):
         train, test = fold.train, fold.test
         print(f"\n[backtest] fold {i}/{len(folds)} — hold out '{fold.name}' "
