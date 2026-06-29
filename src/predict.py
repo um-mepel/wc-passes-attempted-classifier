@@ -34,7 +34,20 @@ def _linpred_samples(model: HierNB, df: pd.DataFrame, n_draws: int, rng) -> tupl
     t_comp = stack("t_comp")[:, take]
     p_prov = stack("p_prov")[:, take]
     beta = stack("beta")[:, take]            # (nfx, n_draws)
-    alpha = stack("alpha")[take]
+    # GK-specific slope (present only on GK-head models; older pickles lack it).
+    has_gk = "beta_gk" in post
+    beta_gk = stack("beta_gk")[:, take] if has_gk else np.zeros_like(beta)
+    # Dispersion. New models: possession-scaled outfield alpha = exp(log_alpha +
+    # gamma_disp·disp_z) plus a GK scalar. Older models: a single scalar alpha (+ GK).
+    n_rows = len(d["is_gk"])
+    if "log_alpha" in post:
+        log_alpha = stack("log_alpha")[take]; gamma_disp = stack("gamma_disp")[take]
+        alpha_gk = stack("alpha_gk")[take]
+        alpha_out = np.exp(log_alpha[None, :] + gamma_disp[None, :] * d["disp_z"][:, None])  # (rows, draws)
+    else:
+        alpha_s = stack("alpha")[take]
+        alpha_gk = stack("alpha_gk")[take] if "alpha_gk" in post else alpha_s
+        alpha_out = np.broadcast_to(alpha_s[None, :], (n_rows, n_draws)).copy()
 
     def gather(arr, idx):
         out = np.zeros((len(idx), n_draws))
@@ -53,8 +66,13 @@ def _linpred_samples(model: HierNB, df: pd.DataFrame, n_draws: int, rng) -> tupl
         + gather(t_comp, np.where(d["comp_effect"] < 0, 0, d["comp_effect"]))
         + gather(p_prov, d["provider"])
         + X @ beta
+        + d["is_gk"][:, None] * (X @ beta_gk)        # GK-only slope deviation
     )
-    return eta, alpha
+    # per-row dispersion: keepers use their own (tighter) alpha_gk; outfielders use the
+    # possession-scaled alpha_out -> (rows, draws)
+    isg = d["is_gk"][:, None] > 0.5
+    alpha_row = np.where(isg, alpha_gk[None, :], alpha_out)
+    return eta, alpha_row
 
 
 def posterior_predictive(model: HierNB, minutes: MinutesModel, df: pd.DataFrame,
@@ -62,16 +80,18 @@ def posterior_predictive(model: HierNB, minutes: MinutesModel, df: pd.DataFrame,
                          use_actual_minutes: bool = False, seed: int = 0) -> np.ndarray:
     """Return an (n_rows, n_draws) sample of passes attempted."""
     rng = np.random.default_rng(seed)
-    eta, alpha = _linpred_samples(model, df, n_draws, rng)            # (rows, draws), (draws,)
+    eta, alpha = _linpred_samples(model, df, n_draws, rng)            # both (rows, draws)
     if use_actual_minutes:
         m = np.repeat(df["minutes"].clip(lower=1).values[:, None], n_draws, axis=1)
     else:
         pids = df["player_id"].values if "player_id" in df else None
         m = minutes.sample_minutes(p_start, n_draws, rng, player_ids=pids)  # (rows, draws)
     mu = np.exp(eta + np.log(np.clip(m, 1, None)))
-    # NB sampling: variance = mu + mu^2/alpha  (pymc alpha convention)
-    p = alpha[None, :] / (alpha[None, :] + mu)
-    return rng.negative_binomial(np.clip(alpha[None, :], 1e-3, None), np.clip(p, 1e-6, 1 - 1e-6))
+    # NB sampling: variance = mu + mu^2/alpha  (pymc alpha convention). alpha is
+    # (rows, draws) — per-row because keepers carry their own dispersion (alpha_gk).
+    a = np.clip(alpha, 1e-3, None)
+    p = a / (a + mu)
+    return rng.negative_binomial(a, np.clip(p, 1e-6, 1 - 1e-6))
 
 
 def prob_over(samples: np.ndarray, line: np.ndarray) -> np.ndarray:

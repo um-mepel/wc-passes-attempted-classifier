@@ -128,6 +128,17 @@ class Fotmob:
             t = (md.get("general", {}) or {}).get(side) or {}
             if t.get("id") is not None:
                 teams.setdefault(t["id"], t.get("name"))
+        # per-player lineup position from pitch depth (own goal=0 .. opp goal=1); the
+        # authoritative GK signal for this match — used to flag keepers in grading so a
+        # name mismatch can't relabel a goalkeeper as an outfielder.
+        pos_by_pid = {}
+        for side in ("homeTeam", "awayTeam"):
+            t = lu.get(side, {}) or {}
+            for grp in ("starters", "subs"):
+                for p in (t.get(grp, []) or []):
+                    p = p[0] if isinstance(p, list) and p else p
+                    if isinstance(p, dict) and p.get("id") is not None:
+                        pos_by_pid[p["id"]] = _pos_from_depth((p.get("horizontalLayout") or {}).get("x"))
 
         rows = []
         for pid, pl in (content.get("playerStats", {}) or {}).items():
@@ -141,9 +152,11 @@ class Fotmob:
                     minutes = s["Minutes played"].get("stat", {}).get("value")
             if attempted is None:
                 continue                                    # didn't play / no pass data
-            rows.append({"match_id": match_id, "player_id": pl.get("id", pid), "player": pl.get("name"),
+            pid_i = pl.get("id", pid)
+            rows.append({"match_id": match_id, "player_id": pid_i, "player": pl.get("name"),
                          "team": teams.get(pl.get("teamId")), "minutes": minutes,
-                         "passes_attempted": attempted, "passes_completed": completed})
+                         "passes_attempted": attempted, "passes_completed": completed,
+                         "fm_position": pos_by_pid.get(pid_i)})
         return pd.DataFrame(rows)
 
 

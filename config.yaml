@@ -72,6 +72,7 @@ model:
 backtest:
   scheme: wc_chunked            # walk_forward (hold out each tournament) | wc_chunked (live-tournament)
   tournament: "World Cup 2026"  # wc_chunked: base = all data before it; then step through its games
-  chunk_days: 1                 # wc_chunked: distinct match-dates per chunk (1 = a day's slate); retrain per chunk
+  chunk_mode: round             # round (one chunk per group matchday: each team's 1st/2nd/3rd game) | days
+  chunk_days: 1                 # wc_chunked days-mode: distinct match-dates per chunk; retrain per chunk
   min_plays_warn: 50            # warn if ROI rests on fewer plays than this
   recalibrate: isotonic

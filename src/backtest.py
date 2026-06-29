@@ -48,7 +48,8 @@ def run(cfg: Config, pm: pd.DataFrame, lines: pd.DataFrame | None = None,
         # Live-tournament backtest: base = all data before the tournament, then step through
         # its matches in date chunks, retraining (per-fold fit below) after each chunk.
         folds = chunked_holdout(pm, tournament=bt.get("tournament", "World Cup 2026"),
-                                chunk_days=int(bt.get("chunk_days", 1)))
+                                chunk_days=int(bt.get("chunk_days", 1)),
+                                chunk_mode=bt.get("chunk_mode", "days"))
         print(f"[backtest] {len(folds)} {bt.get('tournament', 'World Cup 2026')} chunks "
               f"(expanding window, retrain per chunk, {bt.get('chunk_days', 1)} date(s)/chunk)", flush=True)
     else:
@@ -75,11 +76,22 @@ def run(cfg: Config, pm: pd.DataFrame, lines: pd.DataFrame | None = None,
         samples = posterior_predictive(model, minutes, ftest, p_start_test,
                                        use_actual_minutes=use_actual_minutes, seed=cfg["model"]["seed"])
         y = ftest["passes_attempted"].values
-        crps = crps_sample(samples, y).mean()
+        crps_rows = crps_sample(samples, y)
+        crps = crps_rows.mean()
+        ae = np.abs(samples.mean(1) - y)
 
+        # split keepers vs outfield so the GK-head delta is visible (not blended away —
+        # GKs are ~5.5% of rows, so a big GK fix barely moves the overall number).
+        is_gk = ftest["position"].astype(str).str.contains("Goalkeep", case=False, na=False).values
         rec = {"fold": fold.name, "n_test": len(ftest), "crps": float(crps),
-               "mae": float(np.abs(samples.mean(1) - y).mean())}
-        print(f"[backtest] fold {i}/{len(folds)} done — CRPS {rec['crps']:.2f}, MAE {rec['mae']:.1f}", flush=True)
+               "mae": float(ae.mean()),
+               "n_gk": int(is_gk.sum()),
+               "crps_gk": float(crps_rows[is_gk].mean()) if is_gk.any() else float("nan"),
+               "mae_gk": float(ae[is_gk].mean()) if is_gk.any() else float("nan"),
+               "mae_out": float(ae[~is_gk].mean()) if (~is_gk).any() else float("nan")}
+        print(f"[backtest] fold {i}/{len(folds)} done — CRPS {rec['crps']:.2f}, MAE {rec['mae']:.1f} "
+              f"| GK n={rec['n_gk']} CRPS {rec['crps_gk']:.2f} MAE {rec['mae_gk']:.1f} "
+              f"(outfield MAE {rec['mae_out']:.1f})", flush=True)
 
         if lines is not None:
             merged = ftest.merge(lines, on=["match_id", "player_id"], how="inner")

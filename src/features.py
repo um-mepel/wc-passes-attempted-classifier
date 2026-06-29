@@ -72,12 +72,33 @@ def _ewma_asof(values: np.ndarray, weights_age: np.ndarray, halflife: float) -> 
     return float(np.sum(values * decay) / np.sum(decay))
 
 
-def build(pm: pd.DataFrame, cfg: Config, style_map: pd.DataFrame | None = None) -> pd.DataFrame:
+def _fit_poss_model(X: pd.DataFrame, y: pd.Series):
+    """Structured model of EXPECTED possession share: logit(share) ~ elo_gap + hist_diff
+    + home, fit by least squares on the logit of realized possession. The signal is
+    linear and low-dimensional (elo gap alone ~R²0.49, +rest ~0.52, a quadratic term adds
+    0.000), so a small structured regression captures all the learnable signal — black-box
+    ML would only overfit the ~48% irreducible per-game noise. Returns coef [b0,b1,b2,b3]
+    or None if too few labelled rows."""
+    m = y.notna() & X["elo_gap"].notna()
+    if int(m.sum()) < 200:
+        return None
+    yy = np.clip(y[m].values.astype(float), 0.02, 0.98)
+    target = np.log(yy / (1.0 - yy))                       # logit of realized share
+    A = np.column_stack([np.ones(int(m.sum())), X.loc[m, "elo_gap"].values,
+                         X.loc[m, "hist_diff"].fillna(0).values, X.loc[m, "home"].values])
+    coef, *_ = np.linalg.lstsq(A, target, rcond=None)
+    return coef
+
+
+def build(pm: pd.DataFrame, cfg: Config, style_map: pd.DataFrame | None = None,
+          poss_model=None) -> pd.DataFrame:
     """Build the feature matrix. `pm` is the full player-match label table; features
     for each row use only strictly-earlier matches (as-of-date).
 
     `style_map` (team->style) MUST be fit on training history only (see fit_style_clusters);
     if None it is fit here from all of `pm` (use only for inference/EDA, not CV).
+    `poss_model` (x_poss coefficients) likewise may be passed from a train-only fit; if
+    None it is fit here from `pm` (consistent with the existing role-mean anchor fallback).
     """
     f = cfg["features"]
     pm = pm.sort_values("match_date").reset_index(drop=True).copy()
@@ -178,6 +199,27 @@ def build(pm: pd.DataFrame, cfg: Config, style_map: pd.DataFrame | None = None) 
                        .fillna(pm["team_poss_asof"]))
     pm["opp_poss"] = (pm["opp_poss_real_asof"]
                       .fillna(pm["opp_poss_espn"] / 100.0))
+
+    # ── x_poss: matchup-EXPECTED possession (structured, leakage-safe) ───────────
+    # team_poss is a lagging average; what actually drives build-up pass volume is the
+    # possession a team will HAVE this match, which the matchup sets. Predict the
+    # expected share from as-of inputs (elo gap, historical-possession edge, home).
+    # All inputs are as-of (no current-match info); the coefficients are a structural
+    # global fit (like the role-mean anchor above). Falls back to team_poss when the
+    # matchup signal is missing (e.g. an opponent with no Elo / a prediction row).
+    elo_gap = (pm["team_elo"] - pm["opp_elo"]) / 100.0
+    hist_diff = pm["team_poss"] - pm["opp_poss"]
+    home = pd.to_numeric(pd.Series(pm.get("is_home", 0), index=pm.index), errors="coerce").fillna(0.0)
+    Xp = pd.DataFrame({"elo_gap": elo_gap, "hist_diff": hist_diff, "home": home})
+    coef = poss_model if poss_model is not None else _fit_poss_model(Xp, pm["possession_for"])
+    if coef is not None:
+        logit = (coef[0] + coef[1] * Xp["elo_gap"]
+                 + coef[2] * Xp["hist_diff"].fillna(0.0) + coef[3] * Xp["home"])
+        xp = 1.0 / (1.0 + np.exp(-logit))
+        pm["x_poss"] = np.where(elo_gap.notna(), xp, pm["team_poss"])
+    else:
+        pm["x_poss"] = pm["team_poss"]
+    pm["x_poss"] = pd.to_numeric(pm["x_poss"], errors="coerce").fillna(pm["team_poss"])
     return pm
 
 

@@ -55,14 +55,26 @@ def grade_match(fm: Fotmob, mid: int, label: str, pm, model, mins, sm, cfg) -> p
     rows, meta = [], []
     for _, r in act.iterrows():
         opp = teams[1] if r.team == teams[0] else teams[0]
+        # Fotmob's lineup position is authoritative for THIS match; trust it for the GK
+        # flag so a name mismatch can't relabel a keeper as an outfielder (which also
+        # broke the GK-head: is_gk keys off the position string).
+        is_gk = str(r.get("fm_position")) == "Goalkeeper"
         pid = _match_pid(pm[pm.team == r.team], r.player)
         if pid is not None:
             ph = pm[(pm.player_id == pid) & pm.position.notna()]
-            pos = ph.position.mode().iloc[0] if len(ph) else "Center Midfield"
-            newcap = False
+            sb_pos = ph.position.mode().iloc[0] if len(ph) else None
+            sb_is_gk = "Goalkeep" in str(sb_pos)
+            if is_gk and not sb_is_gk:
+                # never bind a Fotmob keeper to a non-keeper StatsBomb player — that would
+                # inherit an outfielder's passing anchor + position. Treat as a new-cap GK.
+                pid = -(abs(hash(r.player)) % 10_000_000)
+                pos, newcap = "Goalkeeper", True
+            else:
+                pos = "Goalkeeper" if is_gk else (sb_pos or "Center Midfield")
+                newcap = False
         else:
             pid = -(abs(hash(r.player)) % 10_000_000)
-            pos, newcap = "Center Midfield", True
+            pos, newcap = ("Goalkeeper" if is_gk else "Center Midfield"), True
         # Use labels the model actually knows: the Fotmob-first model is trained with
         # competition "World Cup 2026" and provider "fotmob" (NOT "WC 2026"/"statsbomb"),
         # so the t_comp / p_prov effects resolve instead of falling back to 0.
