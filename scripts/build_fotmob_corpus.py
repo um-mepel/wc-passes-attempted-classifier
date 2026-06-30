@@ -170,6 +170,10 @@ def main():
           f"{int((out.competition == 'World Cup 2026').sum())} WC2026 rows; "
           f"comps: {sorted(out.competition.unique())}")
     combined = combined.sort_values(["match_date", "match_id"]).reset_index(drop=True)
+    # de-conflate / de-fragment player_ids so each id maps to exactly one real person
+    # (cross-source merges otherwise pool different players or split one across ids).
+    from src.deconflate import clean_player_ids
+    combined = clean_player_ids(combined)
     cpath = raw / "combined_player_match.parquet"
     combined.to_parquet(cpath, index=False)
     print(f"[done] wrote {len(combined)} rows ({len(sb)} StatsBomb fallback + {len(out)} Fotmob) -> {cpath}")

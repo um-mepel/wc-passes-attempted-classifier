@@ -55,6 +55,36 @@ def _norm(s):
     return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn").lower()
 
 
+def _same_person(a, b):
+    """Two normalized names denote the same person (token prefix/superset match). Used by the
+    conflation guard so name-variants of ONE player (e.g. 'mbappe' / 'mbappe lottin') don't
+    read as a collision, while genuinely different people sharing an id still do."""
+    ta, tb = a.split(), b.split()
+    if not ta or not tb:
+        return False
+    small, big = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
+    used = [False] * len(big)
+    for t in small:
+        if not any(not used[i] and (t == u or (len(t) >= 3 and u.startswith(t))
+                                    or (len(u) >= 3 and t.startswith(u)))
+                   for i, u in enumerate(big)):
+            return False
+        for i, u in enumerate(big):
+            if not used[i] and (t == u or (len(t) >= 3 and u.startswith(t)) or (len(u) >= 3 and t.startswith(u))):
+                used[i] = True
+                break
+    return True
+
+
+def _n_people(names):
+    """Distinct people among a set of normalized names (greedy clustering by _same_person)."""
+    reps = []
+    for n in (x for x in names if x):
+        if not any(_same_person(n, r) for r in reps):
+            reps.append(n)
+    return len(reps)
+
+
 # ESPN displayName -> StatsBomb team name where they differ
 _ESPN_FIX = {"Cape Verde": "Cabo Verde", "USA": "United States", "Korea Republic": "South Korea"}
 
@@ -127,17 +157,27 @@ def predict(cfg, pm, props) -> pd.DataFrame:
         # Sano) by full-name token overlap — first name breaks the tie, not set order.
         hit = sorted(cands, key=lambda x: len(rtoks & set(_norm(x[1]).split())), reverse=True)
         pid = hit[0][0] if hit else -(abs(hash(r.name)) % 10**7)
-        phist = pm[(pm.player_id == pid) & pm.position.notna()]
+        chosen = hit[0][1] if hit else r.name
+        # CONFLATION GUARD: a player_id that maps to >1 distinct real name is a cross-source
+        # id-merge collision (e.g. several Mexico "Rodríguez" pooled into one id). It poisons
+        # both the history mean and the model's per-player effect with unrelated players'
+        # passes, manufacturing fake edges. Detect it, restrict history to the matched name,
+        # and flag the prop low-trust so it can't surface as a confident pick.
+        conflated = _n_people({_norm(nm) for p, nm in pool if p == pid}) > 1
+        keep = (pm.player_id == pid) & (pm.player.map(_norm) == _norm(chosen)) if conflated \
+            else (pm.player_id == pid)
+        phist = pm[keep & pm.position.notna()]
         position = phist.position.mode().iloc[0] if len(phist) else "Center Midfield"
-        hist = pm.loc[(pm.player_id == pid) & (pm.minutes >= 70), "passes_attempted"]
+        hist = pm.loc[keep & (pm.minutes >= 70), "passes_attempted"]
         rows.append(dict(match_id=9500000, match_date=pd.Timestamp("2026-06-27"), competition="World Cup 2026",
                          season="World Cup 2026", provider="fotmob", has_360=False, team=r.team,
-                         opponent=r.opponent, player_id=pid, player=hit[0][1] if hit else r.name,
+                         opponent=r.opponent, player_id=pid, player=chosen,
                          position=position, minutes=90.0, started=True,
                          passes_attempted=np.nan, passes_completed=np.nan,
-                         line=r.line, hist=hist.mean() if len(hist) else np.nan, is_new=not hit))
+                         line=r.line, hist=hist.mean() if len(hist) else np.nan,
+                         is_new=not hit, conflated=conflated))
     up = pd.DataFrame(rows)
-    feats = build(pd.concat([pm, up.drop(columns=["line", "hist", "is_new"])], ignore_index=True), cfg,
+    feats = build(pd.concat([pm, up.drop(columns=["line", "hist", "is_new", "conflated"])], ignore_index=True), cfg,
                   style_map=fit_style_clusters(team_match_table(pm), cfg["features"]["opponent_style_clusters"])[1])
     # build() re-sorts rows, so work in fu's order and merge line/hist back by player_id —
     # never assign predictions positionally onto `up` (that scrambles player<->prediction).
@@ -145,7 +185,7 @@ def predict(cfg, pm, props) -> pd.DataFrame:
     model = HierNB.load(cfg, cfg.path("models") / "hiernb")
     s = posterior_predictive(model, MinutesModel().fit(pm[pm.minutes > 0]), fu,
                              np.full(len(fu), 1.0), n_draws=1000, use_actual_minutes=True, seed=1)
-    fu = fu.merge(up[["player_id", "line", "hist", "is_new"]].drop_duplicates("player_id"),
+    fu = fu.merge(up[["player_id", "line", "hist", "is_new", "conflated"]].drop_duplicates("player_id"),
                   on="player_id", how="left")
     fu["pred"] = summarize(s).pred.values
     p_over = prob_over(s, fu["line"].values)
@@ -181,6 +221,7 @@ def score(up: pd.DataFrame) -> pd.DataFrame:
     # confidence: model edge, require agreement, kill new caps
     up["confidence"] = up["model_edge"] * up["agree"] * np.where(up["is_new"], 0.25, 1.0)
     up.loc[up["hist"].notna() & ~up["agree"], "confidence"] *= 0.3  # model/history disagree -> distrust
+    up.loc[up["conflated"].fillna(False), "confidence"] = 0.0       # id-collision -> untrustworthy
     return up.sort_values("confidence", ascending=False)
 
 
@@ -231,7 +272,9 @@ def main():
     print("=== all props ranked by confidence ===")
     for r in up.itertuples(index=False):
         h = f"{r.hist:.0f}" if not np.isnan(r.hist) else "n/a"
-        flag = " [new cap-LOW TRUST]" if r.is_new else (" [model/hist disagree]" if not r.agree else "")
+        flag = (" [CONFLATED id-SKIP]" if getattr(r, "conflated", False) else
+                " [new cap-LOW TRUST]" if r.is_new else
+                " [model/hist disagree]" if not r.agree else "")
         print(f"  {r.team:8} {r.player[:22]:22} {r.pick} {r.line:5.1f}  (model {r.pred:4.1f}, hist {h:>3}, "
               f"P(hit) {r.p_hit:.0%}, conf {r.confidence:.2f}){flag}")
     parlays = build_parlays(up, n_parlays=2, legs_per=3)

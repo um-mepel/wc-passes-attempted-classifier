@@ -1,0 +1,47 @@
+date,match_id,competition,team,player,line,pick,p_hit,model,actual,minutes,result
+2026-06-30,4653712.0,World Cup 2026,Norway,Erling Haaland,13.5,U,0.68,11.7,10.0,90.0,WIN
+2026-06-30,4653712.0,World Cup 2026,Norway,Sander Berge,65.5,O,0.55,75.1,78.0,90.0,WIN
+2026-06-30,4653712.0,World Cup 2026,Norway,Alexander Sorloth,21.5,O,0.57,24.6,24.0,71.0,WIN
+2026-06-30,4653712.0,World Cup 2026,Norway,Martin Odegaard,53.5,O,0.55,57.8,66.0,90.0,WIN
+2026-06-30,4653712.0,World Cup 2026,Norway,Kristoffer Ajer,60.5,U,0.62,57.0,54.0,90.0,WIN
+2026-06-30,4653712.0,World Cup 2026,Norway,Antonio Nusa,20.5,U,0.54,20.9,21.0,71.0,LOSS
+2026-06-30,4653712.0,World Cup 2026,Ivory Coast,Nicolas Pepe,30.5,O,0.73,42.0,31.0,87.0,WIN
+2026-06-30,4653712.0,World Cup 2026,Ivory Coast,Yahia Fofana,28.5,O,0.6,31.4,12.0,90.0,LOSS
+2026-06-30,4653712.0,World Cup 2026,Ivory Coast,Ghislain Konan,41.5,O,0.59,47.3,39.0,89.0,LOSS
+2026-06-30,4653712.0,World Cup 2026,Ivory Coast,Yan Diomande,36.5,U,0.88,25.9,34.0,89.0,WIN
+2026-06-30,4653712.0,World Cup 2026,Ivory Coast,Odilon Kossounou,59.5,U,0.68,53.0,39.0,90.0,WIN
+2026-06-30,4653712.0,World Cup 2026,Ivory Coast,Franck Kessie,43.5,U,0.53,44.7,48.0,90.0,LOSS
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-01,,,,,,,WIN
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-02,,,,,,,WIN
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-03,,,,,,,WIN
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-04,,,,,,,WIN
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-05,,,,,,,WIN
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-06,,,,,,,WIN
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-07,,,,,,,WIN
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-08,,,,,,,WIN
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-09,,,,,,,WIN
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-10,,,,,,,WIN
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-11,,,,,,,WIN
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-12,,,,,,,WIN
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-13,,,,,,,WIN
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-14,,,,,,,WIN
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-15,,,,,,,WIN
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-16,,,,,,,WIN
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-17,,,,,,,WIN
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-18,,,,,,,WIN
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-19,,,,,,,WIN
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-20,,,,,,,WIN
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-21,,,,,,,WIN
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-22,,,,,,,LOSS
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-23,,,,,,,LOSS
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-24,,,,,,,LOSS
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-25,,,,,,,LOSS
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-26,,,,,,,LOSS
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-27,,,,,,,LOSS
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-28,,,,,,,LOSS
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-29,,,,,,,LOSS
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-30,,,,,,,LOSS
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-31,,,,,,,LOSS
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-32,,,,,,,LOSS
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-33,,,,,,,LOSS
+2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-34,,,,,,,LOSS
