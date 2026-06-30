@@ -72,21 +72,65 @@ def _ewma_asof(values: np.ndarray, weights_age: np.ndarray, halflife: float) -> 
     return float(np.sum(values * decay) / np.sum(decay))
 
 
-def _fit_poss_model(X: pd.DataFrame, y: pd.Series):
-    """Structured model of EXPECTED possession share: logit(share) ~ elo_gap + hist_diff
-    + home, fit by least squares on the logit of realized possession. The signal is
-    linear and low-dimensional (elo gap alone ~R²0.49, +rest ~0.52, a quadratic term adds
-    0.000), so a small structured regression captures all the learnable signal — black-box
-    ML would only overfit the ~48% irreducible per-game noise. Returns coef [b0,b1,b2,b3]
-    or None if too few labelled rows."""
-    m = y.notna() & X["elo_gap"].notna()
+def style_labels(team_hist: pd.DataFrame, style_map: pd.DataFrame, k: int) -> dict:
+    """Name each style cluster from its centroid profile so the archetypes are readable:
+    a side with high possession AND few passes allowed is a high-press; low possession with
+    many passes allowed is a low-block; high possession+volume is a possession side; the
+    rest are direct/mid. Returns {cluster_id: label}."""
+    prof = (team_hist.merge(style_map, left_on="team", right_index=True, how="inner")
+            .groupby("style").agg(poss=("possession_share", "mean"),
+                                   vol=("team_passes", "mean"),
+                                   allow=("opp_passes_allowed", "mean")))
+    if prof.empty:
+        return {c: f"style{c}" for c in range(k)}
+    z = (prof - prof.mean()) / (prof.std() + 1e-9)
+    out = {}
+    for c, r in z.iterrows():
+        if r["poss"] > 0.4 and r["allow"] < -0.2:
+            out[c] = "high-press"
+        elif r["poss"] < -0.4 and r["allow"] > 0.2:
+            out[c] = "low-block"
+        elif r["poss"] > 0.4:
+            out[c] = "possession"
+        elif r["poss"] < -0.4:
+            out[c] = "direct"
+        else:
+            out[c] = "mid-block"
+    return out
+
+
+# Columns of the expected-possession design, built identically at fit and predict time.
+def _poss_design(pm: pd.DataFrame, k: int) -> pd.DataFrame:
+    """Design matrix for EXPECTED possession share. Combines the matchup strength gap
+    (elo_delta), each side's own recent realised possession, home, and one-hot style
+    clusters for BOTH team and opponent — so a low-block / high-press opponent shifts your
+    expected possession the way it should (cede the ball to you, or contest it)."""
+    home = pd.to_numeric(pd.Series(pm.get("is_home", 0), index=pm.index), errors="coerce").fillna(0.0)
+    cols = {
+        "intercept": np.ones(len(pm)),
+        "elo_delta": (pm["elo_delta"].fillna(0.0) / 100.0).values,      # scaled ~[-4,4]
+        "own_poss": pm["team_poss"].fillna(0.5).values,                 # own recent possession
+        "opp_poss": pm["opp_poss"].fillna(0.5).values,                  # opponent's recent possession
+        "home": home.values,
+    }
+    for c in range(k):                                                  # style archetypes
+        cols[f"tstyle{c}"] = (pm["team_style"] == c).astype(float).values
+        cols[f"ostyle{c}"] = (pm["opp_style"] == c).astype(float).values
+    return pd.DataFrame(cols, index=pm.index)
+
+
+def _fit_poss_model(design: pd.DataFrame, y: pd.Series):
+    """Fit logit(realised possession) ~ design by least squares (fractional logit). The
+    structure (elo gap + own/opp possession + team & opponent style) is interpretable and
+    low-dimensional, so LS captures the learnable signal without overfitting the ~48%
+    irreducible per-game noise. Returns coef aligned to design columns, or None."""
+    rows = np.isfinite(design.values).all(axis=1)
+    m = y.notna().values & rows
     if int(m.sum()) < 200:
         return None
-    yy = np.clip(y[m].values.astype(float), 0.02, 0.98)
+    yy = np.clip(y.values[m].astype(float), 0.02, 0.98)
     target = np.log(yy / (1.0 - yy))                       # logit of realized share
-    A = np.column_stack([np.ones(int(m.sum())), X.loc[m, "elo_gap"].values,
-                         X.loc[m, "hist_diff"].fillna(0).values, X.loc[m, "home"].values])
-    coef, *_ = np.linalg.lstsq(A, target, rcond=None)
+    coef, *_ = np.linalg.lstsq(design.values[m], target, rcond=None)
     return coef
 
 
@@ -128,6 +172,10 @@ def build(pm: pd.DataFrame, cfg: Config, style_map: pd.DataFrame | None = None,
                  .rename(columns={"team": "opponent", "style": "opp_style"}))
     pm = pm.merge(opp_style, on=["match_id", "opponent"], how="left")
     pm["opp_style"] = pm["opp_style"].fillna(-1).astype(int)
+    # the TEAM's own style cluster too (for the expected-possession model)
+    pm = pm.merge(style_map.rename(columns={"style": "team_style"}),
+                  left_on="team", right_index=True, how="left")
+    pm["team_style"] = pm["team_style"].fillna(-1).astype(int)
 
     # AS-OF-DATE team context — NEVER the current match. possession_share /
     # opp_passes_allowed are realized only AFTER kickoff, so using the current
@@ -191,6 +239,9 @@ def build(pm: pd.DataFrame, cfg: Config, style_map: pd.DataFrame | None = None,
     # the per-player corpus. Elo blends Fotmob scores (preferred) with ESPN results;
     # team_poss_espn is the ESPN possession fallback. Leakage-safe (only pre-date matches).
     pm = _attach_espn(pm, cfg)
+    # Elo DELTA (matchup gap) — the single most predictive Elo signal for who controls the
+    # ball and thus pass volume; the model standardises it, so raw points are fine.
+    pm["elo_delta"] = pm["team_elo"] - pm["opp_elo"]
 
     # ── Fotmob-first own/opponent possession (single 0-1 signal) ────────────────
     # realized (Fotmob) as-of  ->  ESPN as-of (0-100 -> 0-1)  ->  pass-count proxy.
@@ -202,24 +253,21 @@ def build(pm: pd.DataFrame, cfg: Config, style_map: pd.DataFrame | None = None,
 
     # ── x_poss: matchup-EXPECTED possession (structured, leakage-safe) ───────────
     # team_poss is a lagging average; what actually drives build-up pass volume is the
-    # possession a team will HAVE this match, which the matchup sets. Predict the
-    # expected share from as-of inputs (elo gap, historical-possession edge, home).
-    # All inputs are as-of (no current-match info); the coefficients are a structural
-    # global fit (like the role-mean anchor above). Falls back to team_poss when the
-    # matchup signal is missing (e.g. an opponent with no Elo / a prediction row).
-    elo_gap = (pm["team_elo"] - pm["opp_elo"]) / 100.0
-    hist_diff = pm["team_poss"] - pm["opp_poss"]
-    home = pd.to_numeric(pd.Series(pm.get("is_home", 0), index=pm.index), errors="coerce").fillna(0.0)
-    Xp = pd.DataFrame({"elo_gap": elo_gap, "hist_diff": hist_diff, "home": home})
+    # possession a team will HAVE this match, which the matchup sets. Predict the expected
+    # share from as-of inputs only: the Elo gap (strength), each side's own recent
+    # possession (style), and BOTH teams' style clusters (press / low-block / etc.) — so a
+    # low-block opponent cedes the ball and a high-press opponent contests it. Coefficients
+    # are a structural global fit; falls back to team_poss when the matchup signal is thin.
+    k = int(f["opponent_style_clusters"])
+    Xp = _poss_design(pm, k)
     coef = poss_model if poss_model is not None else _fit_poss_model(Xp, pm["possession_for"])
-    if coef is not None:
-        logit = (coef[0] + coef[1] * Xp["elo_gap"]
-                 + coef[2] * Xp["hist_diff"].fillna(0.0) + coef[3] * Xp["home"])
-        xp = 1.0 / (1.0 + np.exp(-logit))
-        pm["x_poss"] = np.where(elo_gap.notna(), xp, pm["team_poss"])
+    if coef is not None and len(coef) == Xp.shape[1]:
+        logit = Xp.values @ coef
+        xp = 1.0 / (1.0 + np.exp(-np.clip(logit, -20, 20)))
+        pm["x_poss"] = np.where(np.isfinite(logit), xp, pm["team_poss"])
     else:
         pm["x_poss"] = pm["team_poss"]
-    pm["x_poss"] = pd.to_numeric(pm["x_poss"], errors="coerce").fillna(pm["team_poss"])
+    pm["x_poss"] = pd.to_numeric(pm["x_poss"], errors="coerce").fillna(pm["team_poss"]).fillna(0.5)
     return pm
 
 
@@ -270,7 +318,27 @@ def _attach_espn(pm: pd.DataFrame, cfg: Config) -> pd.DataFrame:
         for c in cols:
             pm[c] = 1500.0 if c.endswith("elo") else np.nan
         return pm
-    return attach(pm, results, poss)
+    # Prefer the seeded major-tournament Elo (FIFA-anchored, margin-vs-expectation) when
+    # the major-results table is present; fall back to the plain all-results Elo otherwise.
+    elo = _major_elo(cfg, espn_results)
+    return attach(pm, results, poss, elo=elo)
+
+
+_MAJOR_ELO_CACHE = {}
+
+
+def _major_elo(cfg: Config, espn_results: pd.DataFrame):
+    """Build (and cache) the elo_major timeline. Cached across folds/calls since it only
+    depends on the on-disk major_results + espn_results, not the prediction batch."""
+    key = str(cfg.path("raw") / "major_results.parquet")
+    if key not in _MAJOR_ELO_CACHE:
+        try:
+            from .elo_major import compute_major_elo
+            major = pd.read_parquet(cfg.path("raw") / "major_results.parquet")
+            _MAJOR_ELO_CACHE[key] = compute_major_elo(major, espn_results)
+        except (FileNotFoundError, OSError, ValueError):
+            _MAJOR_ELO_CACHE[key] = None      # fall back to all-results Elo in attach()
+    return _MAJOR_ELO_CACHE[key]
 
 
 _GROUPS = ["def", "wing", "mid", "attack"]

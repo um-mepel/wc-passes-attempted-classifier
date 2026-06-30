@@ -37,11 +37,22 @@ CC = {"FRA": "France", "NOR": "Norway", "ESP": "Spain", "URU": "Uruguay", "BEL":
       "POR": "Portugal", "PRT": "Portugal", "GER": "Germany", "ENG": "England", "NED": "Netherlands",
       "ARG": "Argentina", "COL": "Colombia", "PAN": "Panama", "AUT": "Austria", "DZA": "Algeria",
       "GHA": "Ghana", "HRV": "Croatia", "CRO": "Croatia", "ITA": "Italy", "BRA": "Brazil",
-      "URY": "Uruguay", "ESP2": "Spain", "USA": "United States", "MEX": "Mexico"}
+      "URY": "Uruguay", "ESP2": "Spain", "USA": "United States", "MEX": "Mexico",
+      # ISO-3 codes Underdog actually sends (the abbreviations above are partly wrong/missing):
+      "NLD": "Netherlands", "DEU": "Germany", "JPN": "Japan", "MAR": "Morocco",
+      "CIV": "Ivory Coast", "ECU": "Ecuador", "SWE": "Sweden", "PRY": "Paraguay",
+      "BIH": "Bosnia and Herzegovina", "DZA2": "Algeria"}
+
+
+# Nordic/Germanic letters that NFD does NOT decompose (they're standalone letters,
+# not accented bases) but feeds like Underdog strip to ASCII -> transliterate explicitly.
+_TRANSLIT = str.maketrans({"ø": "o", "Ø": "O", "æ": "ae", "Æ": "AE", "å": "a", "Å": "A",
+                           "ð": "d", "Ð": "D", "þ": "th", "Þ": "TH", "ł": "l", "Ł": "L"})
 
 
 def _norm(s):
-    return "".join(c for c in unicodedata.normalize("NFD", str(s)) if unicodedata.category(c) != "Mn").lower()
+    s = str(s).translate(_TRANSLIT)
+    return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn").lower()
 
 
 # ESPN displayName -> StatsBomb team name where they differ
@@ -108,8 +119,13 @@ def pull_passes_lines() -> pd.DataFrame:
 def predict(cfg, pm, props) -> pd.DataFrame:
     rows = []
     for r in props.itertuples(index=False):
-        pool = set(zip(pm[pm.team == r.team].player_id, pm[pm.team == r.team].player))
-        hit = [(pid, nm) for pid, nm in pool if _norm(r.name.split()[-1]) in _norm(nm).split()]
+        pool = sorted(set(zip(pm[pm.team == r.team].player_id, pm[pm.team == r.team].player)),
+                      key=lambda x: _norm(x[1]))  # deterministic order (set iteration is not)
+        rtoks = set(_norm(r.name).split())
+        cands = [(pid, nm) for pid, nm in pool if _norm(r.name.split()[-1]) in _norm(nm).split()]
+        # disambiguate same-last-name collisions (Frenkie vs Luuk de Jong, Kaishu vs Kodai
+        # Sano) by full-name token overlap — first name breaks the tie, not set order.
+        hit = sorted(cands, key=lambda x: len(rtoks & set(_norm(x[1]).split())), reverse=True)
         pid = hit[0][0] if hit else -(abs(hash(r.name)) % 10**7)
         phist = pm[(pm.player_id == pid) & pm.position.notna()]
         position = phist.position.mode().iloc[0] if len(phist) else "Center Midfield"
@@ -137,15 +153,21 @@ def predict(cfg, pm, props) -> pd.DataFrame:
     return fu
 
 
-def _calibrate(cfg, p_over):
-    """Apply the isotonic calibrator if it has been fit (scripts/calibrate.py)."""
+def _calibrate(cfg, p_over, raw_weight=0.7):
+    """SOFT-BLEND the raw model probability with the isotonic calibrator: the rebuilt
+    model is well-calibrated raw (70%->70% empirically), so the isotonic map over-tempers
+    (pulls 70%->64%). Blend keeps a touch of extreme-shrinkage without killing +EV overs:
+        p = raw_weight·raw + (1-raw_weight)·isotonic(raw).
+    """
     import pickle
+    raw = np.clip(p_over, 0.0, 1.0)
     path = cfg.path("models") / "calibrator.pkl"
     if not path.exists():
-        return p_over
+        return raw
     with open(path, "rb") as fh:
         iso = pickle.load(fh)
-    return np.clip(iso.predict(np.clip(p_over, 0, 1)), 0.0, 1.0)
+    cal = np.clip(iso.predict(raw), 0.0, 1.0)
+    return np.clip(raw_weight * raw + (1.0 - raw_weight) * cal, 0.0, 1.0)
 
 
 def score(up: pd.DataFrame) -> pd.DataFrame:

@@ -25,7 +25,7 @@ from .config import Config
 # and flipped the own-possession sign — see docs/MODEL_NOTES / model_fixes. The recent-rate
 # anchor sets the per-player level via the player random-effect prior (see fit).
 _FEATURES = ["style_per90_recencybiased", "x_poss", "opp_allowed_asof",
-             "team_elo", "opp_elo", "opp_poss"]
+             "elo_delta", "opp_poss"]
 # NOTE: match-type (qualifier / friendly / tournament) is NOT here — it lives in the
 # t_comp effect via the `comp_effect` class (see features.build), so it generalises to
 # held-out tournaments instead of being a collinear linear flag.

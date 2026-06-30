@@ -35,14 +35,29 @@ def _norm(s) -> str:
 
 
 def _match_pid(pm_team: pd.DataFrame, name: str):
-    """Find a StatsBomb player_id + modal position for a Fotmob name on a team."""
+    """Find a StatsBomb player_id for a Fotmob name on a team. Disambiguates same-last-name
+    collisions (Hiroki vs Junya Ito, the two Reijnders) by FULL-name token overlap — the
+    given name breaks the tie — instead of returning the first last-name match."""
     nn = _norm(name)
-    parts = set(nn.split())
+    ntok = set(nn.split())
+    ln = nn.split()[-1] if nn.split() else nn
+    best, best_score = None, 0
     for _, r in pm_team.drop_duplicates("player_id").iterrows():
         pn = _norm(r.player)
-        if nn == pn or nn in pn or pn in nn or (parts & set(pn.split()) and nn.split()[-1] == pn.split()[-1]):
-            return r.player_id
-    return None
+        ptok = pn.split()
+        if nn == pn:
+            score = 100                                  # exact
+        elif ptok and ln == ptok[-1]:
+            score = 10 + len(ntok & set(ptok))           # same last name, +given-name overlap
+        elif nn in pn or pn in nn:
+            score = 5 + len(ntok & set(ptok))            # substring (mononyms / short forms)
+        elif ntok & set(ptok):
+            score = len(ntok & set(ptok))                # any shared token
+        else:
+            score = 0
+        if score > best_score:
+            best, best_score = r.player_id, score
+    return best if best_score > 0 else None
 
 
 def grade_match(fm: Fotmob, mid: int, label: str, pm, model, mins, sm, cfg) -> pd.DataFrame | None:

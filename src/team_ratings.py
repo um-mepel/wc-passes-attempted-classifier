@@ -22,6 +22,12 @@ NAME_MAP = {
     "Cabo Verde": "Cape Verde", "South Korea": "Korea Republic", "Korea": "Korea Republic",
     "United States": "USA", "China PR": "China", "Ivory Coast": "Cote d'Ivoire",
     "Czech Republic": "Czechia", "IR Iran": "Iran", "Republic of Ireland": "Ireland",
+    # FIFA-2002 / corpus spellings -> the spelling ESPN results use (so seeds, results,
+    # and prediction rows all normalise to one key).
+    "Bosnia and Herzegovina": "Bosnia-Herzegovina",
+    "FYR Macedonia": "North Macedonia", "Macedonia": "North Macedonia",
+    "Türkiye": "Turkey", "Turkiye": "Turkey",
+    "Yugoslavia": "Serbia", "Serbia & Montenegro": "Serbia", "Serbia and Montenegro": "Serbia",
 }
 
 
@@ -79,10 +85,13 @@ def _poss_asof(idx, team, date, window=10):
     return sum(past) / len(past) if past else float("nan")
 
 
-def attach(df: pd.DataFrame, results: pd.DataFrame, poss: pd.DataFrame) -> pd.DataFrame:
+def attach(df: pd.DataFrame, results: pd.DataFrame, poss: pd.DataFrame, elo=None) -> pd.DataFrame:
     """Add team_elo/opp_elo/team_poss_espn/opp_poss_espn (as-of-date) to df.
-    df needs columns: team, opponent, match_date."""
-    elo = compute_elo(results)
+    df needs columns: team, opponent, match_date. Pass `elo` (a precomputed
+    {norm_team: [(date, rating), ...]} timeline, e.g. from elo_major) to override the
+    default all-results Elo."""
+    if elo is None:
+        elo = compute_elo(results)
     pidx = _poss_lookup(poss)
     out = df.copy()
     d = pd.to_datetime(out["match_date"])
