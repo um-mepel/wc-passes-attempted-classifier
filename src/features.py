@@ -106,16 +106,18 @@ def _poss_design(pm: pd.DataFrame, k: int) -> pd.DataFrame:
     clusters for BOTH team and opponent — so a low-block / high-press opponent shifts your
     expected possession the way it should (cede the ball to you, or contest it)."""
     home = pd.to_numeric(pd.Series(pm.get("is_home", 0), index=pm.index), errors="coerce").fillna(0.0)
+    pe_gap = (pm.get("team_poss_elo", pd.Series(1500.0, index=pm.index)).fillna(1500.0)
+              - pm.get("opp_poss_elo", pd.Series(1500.0, index=pm.index)).fillna(1500.0))
+    # Possession-battle Elo is by far the strongest possession predictor (it already
+    # encodes possession style, opponent-adjusted), so x_poss leans on it; elo_delta and
+    # home add a little residual strength/venue signal. Style dummies were dropped — they
+    # add nothing once poss_elo_gap is in (it subsumes press/low-block) and only dilute it.
     cols = {
         "intercept": np.ones(len(pm)),
-        "elo_delta": (pm["elo_delta"].fillna(0.0) / 100.0).values,      # scaled ~[-4,4]
-        "own_poss": pm["team_poss"].fillna(0.5).values,                 # own recent possession
-        "opp_poss": pm["opp_poss"].fillna(0.5).values,                  # opponent's recent possession
+        "poss_elo_gap": (pe_gap / 100.0).values,                       # possession-battle gap
+        "elo_delta": (pm["elo_delta"].fillna(0.0) / 100.0).values,      # strength gap, scaled
         "home": home.values,
     }
-    for c in range(k):                                                  # style archetypes
-        cols[f"tstyle{c}"] = (pm["team_style"] == c).astype(float).values
-        cols[f"ostyle{c}"] = (pm["opp_style"] == c).astype(float).values
     return pd.DataFrame(cols, index=pm.index)
 
 
@@ -242,6 +244,8 @@ def build(pm: pd.DataFrame, cfg: Config, style_map: pd.DataFrame | None = None,
     # Elo DELTA (matchup gap) — the single most predictive Elo signal for who controls the
     # ball and thus pass volume; the model standardises it, so raw points are fine.
     pm["elo_delta"] = pm["team_elo"] - pm["opp_elo"]
+    # Possession-battle Elo (opponent-adjusted possession trend) -> drives x_poss.
+    pm = _attach_poss_elo(pm, cfg)
 
     # ── Fotmob-first own/opponent possession (single 0-1 signal) ────────────────
     # realized (Fotmob) as-of  ->  ESPN as-of (0-100 -> 0-1)  ->  pass-count proxy.
@@ -300,6 +304,37 @@ def _combine_results(fmr: pd.DataFrame, espn: pd.DataFrame) -> pd.DataFrame:
     ek, ed = key(espn)
     keep = [(k, dd) not in seen for k, dd in zip(ek, ed)]
     return pd.concat([fmr, espn[keep]], ignore_index=True)
+
+
+def _attach_poss_elo(pm: pd.DataFrame, cfg: Config) -> pd.DataFrame:
+    """Attach team_poss_elo / opp_poss_elo (as-of-date) from the possession-battle Elo,
+    built from realized possession (Fotmob corpus, ESPN fallback). Leakage-safe via _asof."""
+    from .poss_elo import compute_poss_elo
+    from .team_ratings import _asof, _norm
+    tm = team_match_table(pm)[["match_date", "team", "opponent", "possession_real"]].dropna(
+        subset=["possession_real"]).rename(columns={"match_date": "date", "possession_real": "poss"})
+    try:
+        e = pd.read_parquet(cfg.path("raw") / "espn_team_match.parquet").dropna(subset=["possession"]).copy()
+        e["poss"] = e["possession"] / 100.0 if e["possession"].max() > 1.5 else e["possession"]
+        e = e[["date", "team", "opponent", "poss"]]
+    except (FileNotFoundError, OSError, KeyError):
+        e = pd.DataFrame(columns=["date", "team", "opponent", "poss"])
+    both = pd.concat([tm[["date", "team", "opponent", "poss"]].assign(s="f"),
+                      e.assign(s="e")], ignore_index=True)
+    if both.empty:
+        pm["team_poss_elo"] = 1500.0; pm["opp_poss_elo"] = 1500.0
+        return pm
+    both["date"] = pd.to_datetime(both["date"], utc=True).dt.tz_localize(None)
+    both["tn"] = both["team"].map(_norm); both["on"] = both["opponent"].map(_norm)
+    both["key"] = [(d.normalize(),) + tuple(sorted([a, b]))
+                   for d, a, b in zip(both["date"], both["tn"], both["on"])]
+    both = both.sort_values("s").drop_duplicates(["key", "tn"])     # Fotmob('f') < ESPN('e')
+    matches = both.sort_values("date").drop_duplicates("key")[["date", "tn", "on", "poss"]]
+    tl = compute_poss_elo(matches)
+    d = pd.to_datetime(pm["match_date"], utc=True).dt.tz_localize(None)
+    pm["team_poss_elo"] = [_asof(tl, t, x) for t, x in zip(pm["team"], d)]
+    pm["opp_poss_elo"] = [_asof(tl, o, x) for o, x in zip(pm["opponent"], d)]
+    return pm
 
 
 def _attach_espn(pm: pd.DataFrame, cfg: Config) -> pd.DataFrame:
