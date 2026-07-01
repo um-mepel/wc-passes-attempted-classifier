@@ -28,6 +28,9 @@ def corpus() -> pd.DataFrame:
         for matchday in range(3):
             mid += 1
             date = base + pd.Timedelta(days=4 * matchday)
+            # realized ball possession for team X this match (fraction) — build() needs it
+            # for the x_poss fit; varies per match so the possession model has signal.
+            poss = float(np.clip(rng.normal(0.52, 0.08), 0.3, 0.7))
             for pid, name, pos in players:
                 minutes = int(rng.integers(20, 95))
                 rate = {1: 70, 2: 55, 3: 30, 4: 25}[pid]
@@ -38,6 +41,7 @@ def corpus() -> pd.DataFrame:
                     player_id=pid, player=name, position=pos,
                     minutes=minutes, started=minutes >= 60,
                     passes_attempted=passes, passes_completed=int(passes * 0.85),
+                    possession_for=poss,
                 ))
     df = pd.DataFrame(rows)
     df["match_date"] = pd.to_datetime(df["match_date"])

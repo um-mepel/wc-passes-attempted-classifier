@@ -25,7 +25,8 @@ def test_first_appearance_has_no_history(corpus, cfg):
 def test_future_outlier_does_not_change_past_features(corpus, cfg):
     """Plant a huge outlier in each player's LAST match; earlier rows must be unchanged.
     If as-of-date were violated (row saw the future), earlier features would move."""
-    cols = ["recent_per90", "style_per90_recencybiased", "team_poss_asof", "opp_allowed_asof"]
+    cols = ["recent_per90", "style_per90_recencybiased", "team_poss_asof", "opp_allowed_asof",
+            "share_asof"]
     base = build(corpus, cfg)[["match_id", "player_id", *cols]]
 
     poisoned = corpus.copy()
@@ -39,6 +40,17 @@ def test_future_outlier_does_not_change_past_features(corpus, cfg):
     for col in cols:
         b, a = earlier[f"{col}_base"].values, earlier[f"{col}_after"].values
         assert np.allclose(np.nan_to_num(b), np.nan_to_num(a)), f"{col} leaked future info"
+
+
+def test_magnetism_features_ignore_current_match(corpus, cfg):
+    """share_asof (player's share of team passes) and team_vol_asof (team pass volume)
+    must be as-of: a player's first-ever match has share_asof NaN, and a team's first-ever
+    match has team_vol_asof NaN — proving neither uses the current match's realized passes."""
+    feats = build(corpus, cfg).sort_values("match_date")
+    first_player = feats.groupby("player_id").head(1)
+    assert first_player["share_asof"].isna().all(), "share used current match"
+    first_team = feats.groupby("team").head(1)
+    assert first_team["team_vol_asof"].isna().all(), "team volume used current match"
 
 
 def test_possession_features_ignore_current_match(corpus, cfg):

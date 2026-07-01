@@ -193,8 +193,15 @@ def build(pm: pd.DataFrame, cfg: Config, style_map: pd.DataFrame | None = None,
     # are fallbacks — see the coalesce after _attach_espn).
     tm["team_poss_real_asof"] = (tm.groupby("team")["possession_real"]
                                  .transform(lambda s: s.shift().expanding().mean()))
-    # player's own team possession (as-of): pass-proxy + realized
-    pm = pm.merge(tm[["match_id", "team", "team_poss_asof", "team_poss_real_asof"]],
+    # AS-OF team passing VOLUME: expanding mean of the team's PAST total passes. This is the
+    # "how much does this team pass" factor of the magnetism decomposition (passes = team
+    # volume x player share); leakage-safe via shift() exactly like the possession as-ofs.
+    tm["team_vol_asof"] = (tm.groupby("team")["team_passes"]
+                           .transform(lambda s: s.shift().expanding().mean()))
+    # player's own team possession (as-of): pass-proxy + realized; plus current-match team
+    # total (for the share denominator) and the as-of team volume factor.
+    pm = pm.merge(tm[["match_id", "team", "team_poss_asof", "team_poss_real_asof",
+                      "team_passes", "team_vol_asof"]],
                   on=["match_id", "team"], how="left")
     # opponent's historically-allowed passes (as-of) = "park factor" for the matchup
     opp_allowed = tm[["match_id", "team", "team_allowed_asof"]].rename(
@@ -204,6 +211,15 @@ def build(pm: pd.DataFrame, cfg: Config, style_map: pd.DataFrame | None = None,
     opp_poss_real = tm[["match_id", "team", "team_poss_real_asof"]].rename(
         columns={"team": "opponent", "team_poss_real_asof": "opp_poss_real_asof"})
     pm = pm.merge(opp_poss_real, on=["match_id", "opponent"], how="left")
+
+    # ── MAGNETISM: player's share of team passes (as-of) ────────────────────────
+    # share = this player's passes / his team's total this match (realized, so it would
+    # LEAK if used raw). share_asof is the expanding mean of the player's PAST shares
+    # (shift() drops the current match) — a stable player-identity trait (split-half
+    # r~0.87). Paired with team_vol_asof it factorises passes = team_volume x share.
+    pm["share"] = pm["passes_attempted"] / pm["team_passes"].where(pm["team_passes"] > 0)
+    pm["share_asof"] = (pm.groupby("player_id")["share"]
+                        .transform(lambda s: s.shift().expanding().mean()))
 
     hl_style = f["style_recency_halflife_matches"]
     recent_rate, style_rate = [], []
