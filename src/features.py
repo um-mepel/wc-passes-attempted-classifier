@@ -222,9 +222,11 @@ def build(pm: pd.DataFrame, cfg: Config, style_map: pd.DataFrame | None = None,
                         .transform(lambda s: s.shift().expanding().mean()))
 
     hl_style = f["style_recency_halflife_matches"]
-    recent_rate, style_rate = [], []
+    hl_share = f["recency_halflife_matches"]   # share trend window (same as player-rate)
+    recent_rate, style_rate, share_recency = [], [], []
     # per-player history: list of (per90, opp_style, competition), chronological.
     hist: dict = {}
+    shist: dict = {}   # per-player chronological PAST shares (for the recency-weighted share)
     for row in pm.itertuples(index=False):
         pid = row.player_id
         h = hist.get(pid, [])
@@ -240,10 +242,20 @@ def build(pm: pd.DataFrame, cfg: Config, style_map: pd.DataFrame | None = None,
         hs = [v for v, sst, _ in h if sst == row.opp_style]
         ages_s = np.arange(len(hs), 0, -1)
         style_rate.append(_ewma_asof(np.array(hs), ages_s, hl_style) if hs else np.nan)
+        # RECENCY-WEIGHTED SHARE: EWMA of the player's PAST shares (most recent weighted
+        # most). Unlike the flat expanding-mean share_asof, this tracks a rising/falling
+        # magnetism TREND (e.g. Kounde's share drifting 0.15 -> 0.09), which the flat mean
+        # and the level-only a_player anchor both miss.
+        ph = shist.get(pid, [])
+        ages_sh = np.arange(len(ph), 0, -1)
+        share_recency.append(_ewma_asof(np.array(ph), ages_sh, hl_share) if ph else np.nan)
         hist.setdefault(pid, []).append((row.per90, row.opp_style, row.competition))
+        if row.share == row.share:            # append AFTER compute (leakage-safe), skip NaN
+            shist.setdefault(pid, []).append(row.share)
 
     pm["recent_per90"] = recent_rate
     pm["style_per90_recencybiased"] = style_rate
+    pm["share_recencybiased"] = share_recency
     pm["role"] = pm["position"].map(_role_bucket).fillna("UNK")
 
     # ANCHOR fallback for players with no last-2-tournament history (new caps):
@@ -304,6 +316,38 @@ def build(pm: pd.DataFrame, cfg: Config, style_map: pd.DataFrame | None = None,
     _oppp = pd.to_numeric(pm["opp_poss"], errors="coerce").fillna(0.5) - 0.5
     pm["oppposs_x_buildup"] = _is_buildup * _oppp
     pm["oppposs_x_att"] = _is_att * _oppp
+
+    # ── STRIKER PLAYING STYLE: as-of box-touch ratio (poacher vs drop-deep) ──────
+    # touches-in-opposition-box / total-touches (as-of, leakage-safe; precomputed in
+    # data/processed/box_ratio.parquet from the Fotmob cache). ~0 for defenders/keepers,
+    # high (~0.11+) for stay-high poachers whose passes the striker role-mean over-predicts
+    # (+4 bias) while drop-deep link strikers are under-predicted (-3). A single learned
+    # (negative) slope therefore haircuts poachers and lifts link forwards, leaving build-up
+    # players (box_ratio~0) untouched — a playing-STYLE axis, not a volume axis.
+    pm = _attach_box_ratio(pm, cfg)
+    return pm
+
+
+def _attach_box_ratio(pm: pd.DataFrame, cfg: Config) -> pd.DataFrame:
+    """Merge the as-of box-touch ratio by (player, date) via merge_asof (backward) so every
+    row — including a future fixture with no cache entry — gets the player's most recent
+    style. Leakage-safe: box_ratio.parquet already excludes each match from its own as-of."""
+    from .team_ratings import _norm
+    p = cfg.path("processed") / "box_ratio.parquet"
+    if not p.exists():
+        pm["box_ratio_asof"] = np.nan
+        return pm
+    br = pd.read_parquet(p).dropna(subset=["date", "name"]).copy()
+    br["date"] = pd.to_datetime(br["date"]).dt.normalize()
+    br["name"] = br["name"].astype(str)
+    br = br.sort_values("date")
+    left = pd.DataFrame({
+        "name": pm["player"].map(_norm).astype(str).values,
+        "date": pd.to_datetime(pm["match_date"]).dt.tz_localize(None).dt.normalize().values,
+        "_i": np.arange(len(pm)),
+    }).sort_values("date")
+    m = pd.merge_asof(left, br, on="date", by="name", direction="backward")
+    pm["box_ratio_asof"] = m.sort_values("_i")["box_ratio_asof"].values
     return pm
 
 

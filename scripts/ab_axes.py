@@ -36,6 +36,13 @@ from src.splits import walk_forward
 
 WAY1_FEATURES = list(_FEATURES) + [
     "share_asof", "team_vol_asof", "oppposs_x_buildup", "oppposs_x_att"]
+# way1r: identical to way1 but RECENCY-weighted share replaces the flat expanding mean,
+# to isolate whether tracking a share TREND (vs a flat average) adds OOS signal.
+WAY1R_FEATURES = list(_FEATURES) + [
+    "share_recencybiased", "team_vol_asof", "oppposs_x_buildup", "oppposs_x_att"]
+# waybox: baseline + striker playing-style (box-touch ratio) — a poacher-vs-drop-deep axis
+# the model lacks. Single feature, isolates whether it fixes the striker over-prediction.
+WAYBOX_FEATURES = list(_FEATURES) + ["box_ratio_asof"]
 # qualifier/friendly folds are a scaler-range artifact, not bet-relevant (see calibrate.py)
 SKIP_FOLDS = {"WC Qualifier", "Intl Friendly"}
 BUILDUP_ROLES = {"CB", "FB", "DM", "CM"}
@@ -96,6 +103,10 @@ def main():
                 s = _hiernb_samples(cfg, ftrain, ftest, list(_FEATURES), seed)
             elif v == "way1":
                 s = _hiernb_samples(cfg, ftrain, ftest, WAY1_FEATURES, seed)
+            elif v == "way1r":
+                s = _hiernb_samples(cfg, ftrain, ftest, WAY1R_FEATURES, seed)
+            elif v == "waybox":
+                s = _hiernb_samples(cfg, ftrain, ftest, WAYBOX_FEATURES, seed)
             elif v == "way2":
                 s = _twostage_samples(cfg, ftrain, ftest, seed)
             else:
@@ -126,6 +137,16 @@ def main():
     print(f"\nrows -> {out}")
     print("buildup_bias = mean(pred - actual) for CB/FB/DM/CM in top possession tercile; "
           "closer to 0 is better (baseline over-predicts these — Kounde/Upamecano failure).")
+
+    # STRIKER-specific view: box_ratio only touches forwards (~16% of rows), so the overall
+    # CRPS is diluted. This is where a striker-style feature must show up if it works.
+    print(f"\n--- STRIKERS only (role==ST) ---")
+    print(f"{'variant':10} {'n':>5} {'CRPS':>7} {'MAE':>7} {'bias':>7}")
+    for v in variants:
+        st = R[(R.variant == v) & (R.role == "ST")]
+        if not len(st):
+            continue
+        print(f"{v:10} {len(st):5} {st.crps.mean():7.2f} {st.ae.mean():7.2f} {float((st.pred-st.y).mean()):+7.2f}")
 
 
 if __name__ == "__main__":
