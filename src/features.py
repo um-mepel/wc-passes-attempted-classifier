@@ -287,7 +287,23 @@ def build(pm: pd.DataFrame, cfg: Config, style_map: pd.DataFrame | None = None,
         pm["x_poss"] = np.where(np.isfinite(logit), xp, pm["team_poss"])
     else:
         pm["x_poss"] = pm["team_poss"]
-    pm["x_poss"] = pd.to_numeric(pm["x_poss"], errors="coerce").fillna(pm["team_poss"]).fillna(0.5)
+    # ── PRESSURE interactions (Way-1 magnetism/pressure axis) ───────────────────
+    # A player's SHARE of team passes slopes with opponent ball-dominance, but the sign
+    # is POSITIONAL (validated: backs/FBs -0.03..-0.05 recycle vs a low block & are bypassed
+    # under press; forwards/wings +0.005..+0.026). A single global opp_poss slope averages
+    # these opposite signs to ~0, so expose position-split interactions the model can slope
+    # separately. Centred at 0.5 so the interaction is 0 at neutral possession. GK pressure
+    # (+0.088) is already carried by the existing beta_gk slope on opp_poss.
+    _pos = pm["position"].astype(str)
+    _is_buildup = ((_pos.str.contains("Back", case=False, na=False)
+                    | _pos.str.contains("Midfield", case=False, na=False))
+                   & ~_pos.str.contains("Goalkeep", case=False, na=False)).astype(float)
+    _is_att = (_pos.str.contains("Forward", case=False, na=False)
+               | _pos.str.contains("Wing", case=False, na=False)
+               | _pos.str.contains("Striker", case=False, na=False)).astype(float)
+    _oppp = pd.to_numeric(pm["opp_poss"], errors="coerce").fillna(0.5) - 0.5
+    pm["oppposs_x_buildup"] = _is_buildup * _oppp
+    pm["oppposs_x_att"] = _is_att * _oppp
     return pm
 
 

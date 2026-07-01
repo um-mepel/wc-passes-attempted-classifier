@@ -59,11 +59,14 @@ def _heartbeat(total: int, every: int = 100):
 
 
 class HierNB:
-    def __init__(self, cfg: Config):
+    def __init__(self, cfg: Config, features: list | None = None):
         self.cfg = cfg
         self.m = cfg["model"]
         self.idata = None
         self.levels: dict = {}
+        # Feature list is overridable so A/B variants (e.g. + magnetism/pressure) can be
+        # fit from the SAME class on identical folds. Defaults to the production _FEATURES.
+        self.features = list(features) if features is not None else list(_FEATURES)
 
     def _design(self, df: pd.DataFrame, training: bool):
         """Map categorical levels to integer codes, remembering training levels so
@@ -88,7 +91,7 @@ class HierNB:
         out["pstyle"] = codes
         # Standardize/impute with TRAIN statistics only — fitting the scaler on the
         # test batch would leak the test distribution into the design matrix.
-        raw = df[_FEATURES]
+        raw = df[self.features]
         if training:
             self._impute = raw.median(numeric_only=True)
             filled = raw.fillna(self._impute).fillna(0.0)
@@ -260,7 +263,8 @@ class HierNB:
         path = Path(path); path.mkdir(parents=True, exist_ok=True)
         with open(path / "model.pkl", "wb") as fh:
             pickle.dump({"idata": self.idata, "levels": self.levels, "impute": self._impute,
-                         "scale_mean": self._scale_mean, "scale_std": self._scale_std}, fh)
+                         "scale_mean": self._scale_mean, "scale_std": self._scale_std,
+                         "features": self.features}, fh)
 
     @classmethod
     def load(cls, cfg: Config, path: str | Path) -> "HierNB":
@@ -270,4 +274,6 @@ class HierNB:
             blob = pickle.load(fh)
         obj.idata, obj.levels = blob["idata"], blob["levels"]
         obj._impute, obj._scale_mean, obj._scale_std = blob["impute"], blob["scale_mean"], blob["scale_std"]
+        # older pickles predate the overridable feature list -> fall back to production _FEATURES
+        obj.features = blob.get("features", list(_FEATURES))
         return obj
