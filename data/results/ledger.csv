@@ -45,3 +45,14 @@ date,match_id,competition,team,player,line,pick,p_hit,model,actual,minutes,resul
 2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-32,,,,,,,LOSS
 2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-33,,,,,,,LOSS
 2026-06-29,,World Cup 2026,(2026-06-29 aggregate),prior-leg-34,,,,,,,LOSS
+2026-06-30,4653704.0,World Cup 2026,France,Michael Olise,47.5,O,0.698,62.0,69.0,85.0,WIN
+2026-06-30,4653704.0,World Cup 2026,France,Ousmane Dembélé,39.5,O,0.659,49.7,39.0,75.0,LOSS
+2026-06-30,4653704.0,World Cup 2026,France,Kylian Mbappé,33.5,O,0.659,42.7,41.0,85.0,WIN
+2026-06-30,4653704.0,World Cup 2026,France,Jules Koundé,57.5,O,0.603,68.5,40.0,75.0,LOSS
+2026-06-30,4653704.0,World Cup 2026,Sweden,Gustaf Lagerbielke,45.5,O,0.579,51.8,54.0,90.0,WIN
+2026-06-30,4653704.0,World Cup 2026,France,Mike Maignan,24.5,U,0.564,25.0,24.0,90.0,WIN
+2026-06-30,4653704.0,World Cup 2026,Sweden,Viktor Gyökeres,16.5,U,0.559,17.1,13.0,90.0,WIN
+2026-06-30,4653704.0,World Cup 2026,Sweden,Yasin Ayari,26.5,U,0.559,27.5,26.0,82.0,WIN
+2026-06-30,4653704.0,World Cup 2026,France,Aurélien Djani Tchouaméni,72.5,U,0.525,74.7,67.0,90.0,WIN
+2026-06-30,4653704.0,World Cup 2026,Sweden,Alexander Isak,20.5,U,0.525,22.3,13.0,89.0,WIN
+2026-06-30,4653704.0,World Cup 2026,France,Dayot Upamecano,72.5,U,0.525,77.9,47.0,90.0,WIN
