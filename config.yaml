@@ -55,6 +55,11 @@ features:
   style_recency_halflife_matches: 4      # recency decay for player-vs-STYLE rate (recency-biased)
   use_360_ball_depth: true               # only applied where has_360 is true
   min_minutes_for_label: 1               # rows with 0 minutes are DNPs (handled by minutes model)
+  # Possession-Elo strength bake-in: adds g·elo_delta to the poss-Elo expected-share gap so
+  # minnow blowouts (72% vs San Marino) stop inflating the rating. Validated g=0.3: WC2026
+  # x_poss corr 0.767->0.786, MAE 7.0->6.8pp; passing buildup_bias +2.86->+2.47, CRPS -0.022.
+  # BANKED AT 0.0 — the live model was trained on g=0 x_poss. >>> SET TO 0.3 AT THE NEXT RETRAIN <<<
+  poss_elo_elodelta_g: 0.0
 
 model:
   backend: pymc                 # pymc | numpyro ; the hierarchical NB lives in rate_model.py
@@ -64,6 +69,11 @@ model:
   cores: 2                      # parallel chains, one per core (spawn ctx avoids macOS fork crash)
   target_accept: 0.9
   seed: 20260626
+  # STRIKER box-touch emphasis: dedicated ST-only slope on box_ratio_asof (poacher vs
+  # false-9), prior N(0, box_emphasis). 0 = off. 1.0 chosen from the A/B screen — best
+  # striker CRPS (4.89->4.76), compresses the poacher(+3.8)/false-9(-3.0) split by ~1/3;
+  # gains flatten past 1.0. See scripts/ab_axes.py boxemph variants.
+  box_emphasis: 1.0
   # challenger (optional), selected only if it wins on out-of-sample CRPS
   challenger:
     enabled: false

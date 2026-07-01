@@ -406,7 +406,20 @@ def _attach_poss_elo(pm: pd.DataFrame, cfg: Config) -> pd.DataFrame:
                    for d, a, b in zip(both["date"], both["tn"], both["on"])]
     both = both.sort_values("s").drop_duplicates(["key", "tn"])     # Fotmob('f') < ESPN('e')
     matches = both.sort_values("date").drop_duplicates("key")[["date", "tn", "on", "poss"]]
-    tl = compute_poss_elo(matches)
+    # Bake the as-of result-Elo gap into the possession-Elo update (g>0). pm already carries
+    # leakage-safe elo_delta (set just before this call); map it onto each match by
+    # (normalized date, team, opp) direction so the surviving match direction gets its gap.
+    g = float(cfg["features"].get("poss_elo_elodelta_g", 0.0))
+    if g and "elo_delta" in pm.columns:
+        ed = pm[["match_date", "team", "opponent", "elo_delta"]].dropna(subset=["elo_delta"]).copy()
+        ed["date"] = pd.to_datetime(ed["match_date"], utc=True).dt.tz_localize(None).dt.normalize()
+        ed["tn"] = ed["team"].map(_norm); ed["on"] = ed["opponent"].map(_norm)
+        ed = ed.drop_duplicates(["date", "tn", "on"])[["date", "tn", "on", "elo_delta"]]
+        mk = matches.copy(); mk["date_n"] = mk["date"].dt.normalize()
+        mk = mk.merge(ed.rename(columns={"date": "date_n"}), on=["date_n", "tn", "on"], how="left")
+        mk["elo_delta"] = mk["elo_delta"].fillna(0.0)   # unmatched (ESPN-only) -> no adjustment
+        matches = mk[["date", "tn", "on", "poss", "elo_delta"]]
+    tl = compute_poss_elo(matches, g=g)
     d = pd.to_datetime(pm["match_date"], utc=True).dt.tz_localize(None)
     pm["team_poss_elo"] = [_asof(tl, t, x) for t, x in zip(pm["team"], d)]
     pm["opp_poss_elo"] = [_asof(tl, o, x) for o, x in zip(pm["opponent"], d)]

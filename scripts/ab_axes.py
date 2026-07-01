@@ -48,8 +48,8 @@ SKIP_FOLDS = {"WC Qualifier", "Intl Friendly"}
 BUILDUP_ROLES = {"CB", "FB", "DM", "CM"}
 
 
-def _hiernb_samples(cfg, ftrain, ftest, features, seed):
-    model = HierNB(cfg, features=features).fit(ftrain)
+def _hiernb_samples(cfg, ftrain, ftest, features, seed, box_emphasis=0.0):
+    model = HierNB(cfg, features=features, box_emphasis=box_emphasis).fit(ftrain)
     # use_actual_minutes=True -> minutes model + p_start are unused; eval on realized minutes
     return posterior_predictive(model, None, ftest, np.full(len(ftest), 1.0),
                                 n_draws=1000, use_actual_minutes=True, seed=seed)
@@ -107,6 +107,11 @@ def main():
                 s = _hiernb_samples(cfg, ftrain, ftest, WAY1R_FEATURES, seed)
             elif v == "waybox":
                 s = _hiernb_samples(cfg, ftrain, ftest, WAYBOX_FEATURES, seed)
+            elif v.startswith("boxemph"):
+                # boxemph<sd>: baseline features + dedicated ST-only box slope, prior N(0,sd).
+                # e.g. boxemph1 -> sd=1.0, boxemph2p5 -> sd=2.5. Bigger = more emphasis.
+                emph = float(v.replace("boxemph", "").replace("p", ".") or "1.0")
+                s = _hiernb_samples(cfg, ftrain, ftest, list(_FEATURES), seed, box_emphasis=emph)
             elif v == "way2":
                 s = _twostage_samples(cfg, ftrain, ftest, seed)
             else:

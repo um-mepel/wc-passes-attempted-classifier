@@ -37,6 +37,8 @@ def _linpred_samples(model: HierNB, df: pd.DataFrame, n_draws: int, rng) -> tupl
     # GK-specific slope (present only on GK-head models; older pickles lack it).
     has_gk = "beta_gk" in post
     beta_gk = stack("beta_gk")[:, take] if has_gk else np.zeros_like(beta)
+    # ST-only box-touch slope (present only when the model was fit with box_emphasis>0).
+    beta_box = stack("beta_box")[take] if "beta_box" in post else None
     # Dispersion. New models: possession-scaled outfield alpha = exp(log_alpha +
     # gamma_disp·disp_z) plus a GK scalar. Older models: a single scalar alpha (+ GK).
     n_rows = len(d["is_gk"])
@@ -68,6 +70,8 @@ def _linpred_samples(model: HierNB, df: pd.DataFrame, n_draws: int, rng) -> tupl
         + X @ beta
         + d["is_gk"][:, None] * (X @ beta_gk)        # GK-only slope deviation
     )
+    if beta_box is not None:                          # ST-only box-touch slope
+        eta = eta + d["box_st"][:, None] * beta_box[None, :]
     # per-row dispersion: keepers use their own (tighter) alpha_gk; outfielders use the
     # possession-scaled alpha_out -> (rows, draws)
     isg = d["is_gk"][:, None] > 0.5

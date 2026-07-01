@@ -59,7 +59,8 @@ def _heartbeat(total: int, every: int = 100):
 
 
 class HierNB:
-    def __init__(self, cfg: Config, features: list | None = None):
+    def __init__(self, cfg: Config, features: list | None = None,
+                 box_emphasis: float | None = None):
         self.cfg = cfg
         self.m = cfg["model"]
         self.idata = None
@@ -67,6 +68,15 @@ class HierNB:
         # Feature list is overridable so A/B variants (e.g. + magnetism/pressure) can be
         # fit from the SAME class on identical folds. Defaults to the production _FEATURES.
         self.features = list(features) if features is not None else list(_FEATURES)
+        # STRIKER box-touch emphasis (poacher vs false-9). >0 turns on a dedicated
+        # ST-only slope on box_ratio_asof with prior N(0, box_emphasis); 0 = off, so
+        # production is unchanged unless the knob is set. Bigger = more emphasis. Unlike
+        # a plain feature (one global slope diluted across all positions and shrunk by
+        # the N(0,0.5) beta prior), this slope is fit ONLY on ST rows where the signal
+        # lives — mirrors the beta_gk mechanism.
+        self.box_emphasis = float(box_emphasis if box_emphasis is not None
+                                  else self.m.get("box_emphasis", 0.0))
+        self._box_center, self._box_scale = 0.09, 0.05   # ST box_ratio train stats (defaults)
 
     def _design(self, df: pd.DataFrame, training: bool):
         """Map categorical levels to integer codes, remembering training levels so
@@ -118,6 +128,21 @@ class HierNB:
         _xp = pd.to_numeric(df.get("x_poss", pd.Series(0.5, index=df.index)),
                             errors="coerce").fillna(0.5).to_numpy()
         out["disp_z"] = _buildup * (_xp - 0.5)
+        # STRIKER box-touch slope covariate: is_st · standardized(box_ratio_asof). The
+        # is_st gate zeroes it for every non-striker, so beta_box (added in fit only when
+        # box_emphasis>0) is estimated from ST rows alone — poachers (high box) pushed
+        # down, false-9s (low box) pulled up. Standardized on TRAIN strikers.
+        _is_st = (df["role"].astype(str) == "ST")
+        _box = pd.to_numeric(df.get("box_ratio_asof", pd.Series(np.nan, index=df.index)),
+                             errors="coerce")
+        if training:
+            _stb = _box[_is_st]
+            if _stb.notna().any():
+                self._box_center = float(_stb.median())
+                self._box_scale = float(_stb.std()) if _stb.notna().sum() > 1 else 0.05
+            self._box_scale = (self._box_scale or 0.05) + 1e-9
+        _box_z = ((_box.fillna(self._box_center) - self._box_center) / self._box_scale).to_numpy()
+        out["box_st"] = _is_st.to_numpy(dtype=float) * _box_z
         # recent-rate anchor (per-90): the model's level baseline (a log-offset).
         out["anchor"] = df.get("anchor_per90", pd.Series(30.0, index=df.index)).clip(lower=1.0).values
         out["y"] = df["passes_attempted"].values if "passes_attempted" in df else None
@@ -206,6 +231,15 @@ class HierNB:
             gamma_disp = pm.Normal("gamma_disp", 0.0, 0.5)
             alpha_out = pm.math.exp(log_alpha + gamma_disp * d["disp_z"])   # per-row
 
+            # STRIKER box-touch slope (poacher vs false-9). Only added when box_emphasis>0;
+            # prior N(0, box_emphasis) — a wider knob than the shared beta prior (0.5) so the
+            # slope can carry the full ~7-pass poacher/false-9 swing instead of being shrunk.
+            if self.box_emphasis and self.box_emphasis > 0:
+                beta_box = pm.Normal("beta_box", 0.0, self.box_emphasis)
+                box_term = beta_box * d["box_st"]
+            else:
+                box_term = 0.0
+
             def gather(arr, idx, fill=0.0):
                 safe = np.where(idx < 0, 0, idx)
                 val = arr[safe]
@@ -221,6 +255,7 @@ class HierNB:
                 + gather(p_prov, d["provider"])
                 + pm.math.dot(d["X"], beta)
                 + d["is_gk"] * pm.math.dot(d["X"], beta_gk)   # GK-only slope deviation
+                + box_term                                    # ST-only box-touch slope
             )
             # per-row dispersion: keepers use their own (tighter) alpha_gk, outfielders
             # use the possession-scaled alpha_out.
@@ -264,7 +299,8 @@ class HierNB:
         with open(path / "model.pkl", "wb") as fh:
             pickle.dump({"idata": self.idata, "levels": self.levels, "impute": self._impute,
                          "scale_mean": self._scale_mean, "scale_std": self._scale_std,
-                         "features": self.features}, fh)
+                         "features": self.features, "box_emphasis": self.box_emphasis,
+                         "box_center": self._box_center, "box_scale": self._box_scale}, fh)
 
     @classmethod
     def load(cls, cfg: Config, path: str | Path) -> "HierNB":
@@ -276,4 +312,8 @@ class HierNB:
         obj._impute, obj._scale_mean, obj._scale_std = blob["impute"], blob["scale_mean"], blob["scale_std"]
         # older pickles predate the overridable feature list -> fall back to production _FEATURES
         obj.features = blob.get("features", list(_FEATURES))
+        # older pickles predate the box-emphasis term -> off (0.0), defaults for center/scale
+        obj.box_emphasis = blob.get("box_emphasis", 0.0)
+        obj._box_center = blob.get("box_center", 0.09)
+        obj._box_scale = blob.get("box_scale", 0.05)
         return obj
