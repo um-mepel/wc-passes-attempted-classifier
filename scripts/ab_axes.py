@@ -28,7 +28,7 @@ import numpy as np
 import pandas as pd
 
 from src.config import Config
-from src.features import build, fit_style_clusters, load_corpus, team_match_table
+from src.features import build, fit_style_clusters, fit_style_axis, load_corpus, team_match_table
 from src.rate_model import HierNB, _FEATURES
 from src.predict import posterior_predictive
 from src.backtest import crps_sample
@@ -112,6 +112,22 @@ def main():
                 # e.g. boxemph1 -> sd=1.0, boxemph2p5 -> sd=2.5. Bigger = more emphasis.
                 emph = float(v.replace("boxemph", "").replace("p", ".") or "1.0")
                 s = _hiernb_samples(cfg, ftrain, ftest, list(_FEATURES), seed, box_emphasis=emph)
+            elif v.startswith("stylecont"):
+                # stylecont<bw>: baseline features, but style_per90_recencybiased uses the
+                # CONTINUOUS similarity kernel (bandwidth bw std units) instead of hard style
+                # buckets. Needs its own feature build. e.g. stylecont -> bw=1.0, stylecont0p5.
+                bw = float(v.replace("stylecont", "").replace("p", ".") or "1.0")
+                axis = fit_style_axis(team_match_table(train))          # train-only axis
+                cfg["features"]["style_continuous"] = True
+                cfg["features"]["style_kernel_bw"] = bw
+                fsc = build(pd.concat([train, test]), cfg, style_map=km, style_axis=axis)
+                cfg["features"]["style_continuous"] = False
+                tr = fsc[fsc["match_id"].isin(train["match_id"]) & (fsc["minutes"] > 0)]
+                te = fsc[fsc["match_id"].isin(test["match_id"]) & fsc["started"].fillna(False)
+                         & (fsc["minutes"] > 0)]
+                s = _hiernb_samples(cfg, tr, te, list(_FEATURES), seed)
+                per_row.append(_score(v, s, te).assign(fold=fold.name))
+                continue
             elif v == "way2":
                 s = _twostage_samples(cfg, ftrain, ftest, seed)
             else:

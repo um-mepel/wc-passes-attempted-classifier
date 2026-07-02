@@ -41,7 +41,8 @@ CC = {"FRA": "France", "NOR": "Norway", "ESP": "Spain", "URU": "Uruguay", "BEL":
       # ISO-3 codes Underdog actually sends (the abbreviations above are partly wrong/missing):
       "NLD": "Netherlands", "DEU": "Germany", "JPN": "Japan", "MAR": "Morocco",
       "CIV": "Ivory Coast", "ECU": "Ecuador", "SWE": "Sweden", "PRY": "Paraguay",
-      "BIH": "Bosnia and Herzegovina", "DZA2": "Algeria"}
+      "BIH": "Bosnia and Herzegovina", "DZA2": "Algeria",
+      "CHE": "Switzerland", "SUI": "Switzerland", "CPV": "Cape Verde", "CAV": "Cape Verde"}
 
 
 # Nordic/Germanic letters that NFD does NOT decompose (they're standalone letters,

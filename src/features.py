@@ -13,6 +13,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
 
 from .config import Config
 
@@ -53,6 +54,28 @@ def fit_style_clusters(team_hist: pd.DataFrame, k: int) -> tuple[KMeans, pd.Data
     km = KMeans(n_clusters=k, n_init=10, random_state=0).fit(X.values)
     prof["style"] = km.labels_
     return km, prof[["style"]]
+
+
+def fit_style_axis(team_hist: pd.DataFrame) -> pd.Series:
+    """CONTINUOUS analogue of fit_style_clusters: project each team onto the first
+    principal component of its (possession, volume, allowed) profile — a single
+    'defensive <-> attacking possession' axis (PC1 explains ~82% of the style variance the
+    k discrete clusters bin). Sign-fixed so higher = more possession-dominant, and scaled to
+    unit std so the kernel bandwidth (style_kernel_bw) is in interpretable std units.
+
+    Fit on TRAINING history only, exactly like fit_style_clusters. Returns team -> score."""
+    prof = (team_hist.groupby("team")
+            .agg(poss=("possession_share", "mean"),
+                 vol=("team_passes", "mean"),
+                 allow=("opp_passes_allowed", "mean")).dropna())
+    if len(prof) < 3:
+        return pd.Series(0.0, index=prof.index, name="style_c")
+    Xz = (prof - prof.mean()) / (prof.std() + 1e-9)
+    pc1 = PCA(n_components=1).fit_transform(Xz.values)[:, 0]
+    if np.corrcoef(pc1, Xz["poss"].values)[0, 1] < 0:      # orient: + = possession-dominant
+        pc1 = -pc1
+    pc1 = pc1 / (pc1.std() + 1e-9)                          # unit std -> bandwidth in std units
+    return pd.Series(pc1, index=prof.index, name="style_c")
 
 
 # ── recency-weighted as-of-date player rates ────────────────────────────────
@@ -137,7 +160,7 @@ def _fit_poss_model(design: pd.DataFrame, y: pd.Series):
 
 
 def build(pm: pd.DataFrame, cfg: Config, style_map: pd.DataFrame | None = None,
-          poss_model=None) -> pd.DataFrame:
+          poss_model=None, style_axis: pd.Series | None = None) -> pd.DataFrame:
     """Build the feature matrix. `pm` is the full player-match label table; features
     for each row use only strictly-earlier matches (as-of-date).
 
@@ -178,6 +201,16 @@ def build(pm: pd.DataFrame, cfg: Config, style_map: pd.DataFrame | None = None,
     pm = pm.merge(style_map.rename(columns={"style": "team_style"}),
                   left_on="team", right_index=True, how="left")
     pm["team_style"] = pm["team_style"].fillna(-1).astype(int)
+
+    # CONTINUOUS opponent-style score (gated by features.style_continuous). Keeps the discrete
+    # opp_style above intact (the rate model's player|opp_style random effect needs discrete
+    # levels); this only feeds the continuous-kernel version of style_per90_recencybiased.
+    if f.get("style_continuous", False):
+        if style_axis is None:
+            style_axis = fit_style_axis(tm)      # train-only if passed in; EDA fallback here
+        pm["opp_style_c"] = pm["opponent"].map(style_axis.to_dict()).astype(float).fillna(0.0)
+    else:
+        pm["opp_style_c"] = 0.0
 
     # AS-OF-DATE team context — NEVER the current match. possession_share /
     # opp_passes_allowed are realized only AFTER kickoff, so using the current
@@ -223,8 +256,10 @@ def build(pm: pd.DataFrame, cfg: Config, style_map: pd.DataFrame | None = None,
 
     hl_style = f["style_recency_halflife_matches"]
     hl_share = f["recency_halflife_matches"]   # share trend window (same as player-rate)
+    continuous_style = bool(f.get("style_continuous", False))
+    bw = float(f.get("style_kernel_bw", 1.0))  # kernel bandwidth in style-axis std units
     recent_rate, style_rate, share_recency = [], [], []
-    # per-player history: list of (per90, opp_style, competition), chronological.
+    # per-player history: list of (per90, opp_style, opp_style_c, competition), chronological.
     hist: dict = {}
     shist: dict = {}   # per-player chronological PAST shares (for the recency-weighted share)
     for row in pm.itertuples(index=False):
@@ -233,15 +268,28 @@ def build(pm: pd.DataFrame, cfg: Config, style_map: pd.DataFrame | None = None,
         # RECENT-RATE ANCHOR: average per90 over the player's LAST 2 TOURNAMENTS only
         # (the 2 most-recently-appeared competitions before this match).
         if h:
-            last2 = list(dict.fromkeys(c for _, _, c in reversed(h)))[:2]
-            vals = [v for v, _, c in h if c in last2]
+            last2 = list(dict.fromkeys(c for _, _, _, c in reversed(h)))[:2]
+            vals = [v for v, _, _, c in h if c in last2]
             recent_rate.append(float(np.mean(vals)) if vals else np.nan)
         else:
             recent_rate.append(np.nan)
-        # recency-biased player×style rate from PAST matches vs THIS style only
-        hs = [v for v, sst, _ in h if sst == row.opp_style]
-        ages_s = np.arange(len(hs), 0, -1)
-        style_rate.append(_ewma_asof(np.array(hs), ages_s, hl_style) if hs else np.nan)
+        # recency-biased player×style rate. DISCRETE: past matches vs THIS style bucket only.
+        # CONTINUOUS: all past matches, weighted by recency AND opponent-style SIMILARITY (a
+        # Gaussian kernel on the continuous style axis) — so a game vs a near-identical opponent
+        # counts fully and a very different one fades, instead of a hard in/out bucket cut.
+        if continuous_style:
+            if h:
+                vv = np.array([v for v, _, _, _ in h])
+                cc = np.array([csc for _, _, csc, _ in h])
+                ages = np.arange(len(vv), 0, -1)
+                w = (0.5 ** (ages / hl_style)) * np.exp(-0.5 * ((cc - row.opp_style_c) / bw) ** 2)
+                style_rate.append(float(np.sum(vv * w) / np.sum(w)) if w.sum() > 0 else np.nan)
+            else:
+                style_rate.append(np.nan)
+        else:
+            hs = [v for v, sst, _, _ in h if sst == row.opp_style]
+            ages_s = np.arange(len(hs), 0, -1)
+            style_rate.append(_ewma_asof(np.array(hs), ages_s, hl_style) if hs else np.nan)
         # RECENCY-WEIGHTED SHARE: EWMA of the player's PAST shares (most recent weighted
         # most). Unlike the flat expanding-mean share_asof, this tracks a rising/falling
         # magnetism TREND (e.g. Kounde's share drifting 0.15 -> 0.09), which the flat mean
@@ -249,7 +297,7 @@ def build(pm: pd.DataFrame, cfg: Config, style_map: pd.DataFrame | None = None,
         ph = shist.get(pid, [])
         ages_sh = np.arange(len(ph), 0, -1)
         share_recency.append(_ewma_asof(np.array(ph), ages_sh, hl_share) if ph else np.nan)
-        hist.setdefault(pid, []).append((row.per90, row.opp_style, row.competition))
+        hist.setdefault(pid, []).append((row.per90, row.opp_style, row.opp_style_c, row.competition))
         if row.share == row.share:            # append AFTER compute (leakage-safe), skip NaN
             shist.setdefault(pid, []).append(row.share)
 

@@ -60,6 +60,13 @@ features:
   # x_poss corr 0.767->0.786, MAE 7.0->6.8pp; passing buildup_bias +2.86->+2.47, CRPS -0.022.
   # BANKED AT 0.0 — the live model was trained on g=0 x_poss. >>> SET TO 0.3 AT THE NEXT RETRAIN <<<
   poss_elo_elodelta_g: 0.0
+  # CONTINUOUS play-style: replace the hard style-BUCKET match in style_per90_recencybiased
+  # with a Gaussian similarity kernel on a continuous possession-control axis (PC1 of the
+  # team poss/vol/allow profile, ~82% of style variance). Discrete opp_style is UNCHANGED
+  # (the rate model's player|opp_style random effect still needs discrete levels). 0/false =
+  # original hard buckets. style_kernel_bw is in style-axis std units (smaller = tighter match).
+  style_continuous: false
+  style_kernel_bw: 1.0
 
 model:
   backend: pymc                 # pymc | numpyro ; the hierarchical NB lives in rate_model.py
