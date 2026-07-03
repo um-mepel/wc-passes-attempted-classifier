@@ -50,7 +50,10 @@ DATES = _expand(
     # --- recent form: friendlies, WC qualifiers, Nations League, WC 2026 ---
     ("2025-03-17", "2025-03-26"), ("2025-06-02", "2025-06-11"), ("2025-09-01", "2025-09-10"),
     ("2025-10-06", "2025-10-15"), ("2025-11-10", "2025-11-20"),
-    ("2026-03-23", "2026-04-01"), ("2026-06-01", "2026-06-27"))
+    ("2026-03-23", "2026-04-01"), ("2026-06-01", _dt.date.today().isoformat()))
+# NOTE: the final WC-2026 window auto-extends to today() so a daily `--refresh` ingests
+# newly-finished matches (Fotmob per-match cache keeps it incremental). Was hardcoded to
+# 2026-06-27, which silently froze the corpus and made daily retrains no-ops.
 
 
 def _norm(s) -> str:

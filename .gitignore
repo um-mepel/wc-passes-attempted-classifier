@@ -45,3 +45,5 @@ data/raw/underdog_lines.csv
 .idea/
 .vscode/
 *.swp
+data/logs/
+data/reports/
