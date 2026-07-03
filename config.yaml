@@ -59,7 +59,17 @@ features:
   # minnow blowouts (72% vs San Marino) stop inflating the rating. Validated g=0.3: WC2026
   # x_poss corr 0.767->0.786, MAE 7.0->6.8pp; passing buildup_bias +2.86->+2.47, CRPS -0.022.
   # BANKED AT 0.0 — the live model was trained on g=0 x_poss. >>> SET TO 0.3 AT THE NEXT RETRAIN <<<
+  # NOTE: poss_elo_seed_lambda (below) largely SUBSUMES this — seed-only beats g=0.3 and stacking
+  # both over-corrects. At the next retrain prefer seed_lambda=0.5 with g=0.0 (see memory).
   poss_elo_elodelta_g: 0.0
+  # Possession-Elo STARTING VALUE: seed each team's poss-Elo at its as-of result-Elo, shrunk toward
+  # 1500 by this lambda, instead of the flat 1500 cold-start (a strong team shouldn't begin the
+  # possession battle rated neutral). lambda=0 = original flat cold-start. Validated lambda=0.5
+  # (one-step-ahead possession): WC2026 corr 0.780->0.808 / MAE 7.11->6.80pp; mature teams (>=3
+  # history) 0.510->0.574 / 9.66->8.88pp — gain persists past cold-start. LIVE at 0.5 since the
+  # 2026-07-02 retrain (2-fold screen: CRPS 7.37->7.33, WC2026 buildup_bias +2.61->+2.17). g stays
+  # 0.0 — seed subsumes it; do NOT enable both. Backup: models/_backup_pre_seed.
+  poss_elo_seed_lambda: 0.5
   # CONTINUOUS play-style: replace the hard style-BUCKET match in style_per90_recencybiased
   # with a Gaussian similarity kernel on a continuous possession-control axis (PC1 of the
   # team poss/vol/allow profile, ~82% of style variance). Discrete opp_style is UNCHANGED

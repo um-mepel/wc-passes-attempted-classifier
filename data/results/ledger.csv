@@ -56,13 +56,51 @@ date,match_id,competition,team,player,line,pick,p_hit,model,actual,minutes,resul
 2026-06-30,4653704.0,World Cup 2026,France,Aurélien Djani Tchouaméni,72.5,U,0.525,74.7,67.0,90.0,WIN
 2026-06-30,4653704.0,World Cup 2026,Sweden,Alexander Isak,20.5,U,0.525,22.3,13.0,89.0,WIN
 2026-06-30,4653704.0,World Cup 2026,France,Dayot Upamecano,72.5,U,0.525,77.9,47.0,90.0,WIN
-2026-07-02,4653709.0,World Cup 2026,Bosnia and Herzegovina,Edin Dzeko,18.5,O,0.712,23.8,15.0,51.0,LOSS
-2026-07-02,4653709.0,World Cup 2026,Bosnia and Herzegovina,Ermedin Demirovic,13.5,U,0.595,12.6,6.0,90.0,WIN
-2026-07-02,4653709.0,World Cup 2026,Bosnia and Herzegovina,Nikola Katic,41.5,O,0.537,45.4,44.0,75.0,WIN
-2026-07-02,4653709.0,World Cup 2026,Bosnia and Herzegovina,Nikola Vasilj,34.5,U,0.534,34.2,32.0,90.0,WIN
-2026-07-02,4653709.0,World Cup 2026,USA,Tim Ream,86.5,U,0.966,54.0,56.0,90.0,WIN
-2026-07-02,4653709.0,World Cup 2026,USA,Tyler Adams,69.5,U,0.819,53.8,47.0,90.0,WIN
-2026-07-02,4653709.0,World Cup 2026,USA,Weston McKennie,48.5,U,0.707,41.5,42.0,89.0,WIN
-2026-07-02,4653709.0,World Cup 2026,USA,Christian Pulisic,35.5,U,0.572,34.6,26.0,88.0,WIN
-2026-07-02,4653709.0,World Cup 2026,USA,Antonee Robinson,53.5,U,0.568,52.4,41.0,90.0,WIN
-2026-07-02,4653709.0,World Cup 2026,USA,Folarin Balogun,18.5,U,0.537,18.5,9.0,64.0,WIN
+2026-07-02,4653708.0,World Cup 2026,Austria,Alexander Schlager,30.5,U,0.679,26.4,38.0,90.0,LOSS
+2026-07-02,4653708.0,World Cup 2026,Austria,Nicolas Seiwald,40.5,U,0.575,39.5,17.0,45.0,WIN
+2026-07-02,4653708.0,World Cup 2026,Austria,Marcel Sabitzer,28.5,O,0.531,31.1,18.0,90.0,LOSS
+2026-07-02,4653708.0,World Cup 2026,Austria,Stefan Posch,28.5,O,0.519,30.4,21.0,85.0,LOSS
+2026-07-02,4653707.0,World Cup 2026,Croatia,Petar Sucic,38.5,O,0.707,49.1,39.0,90.0,WIN
+2026-07-02,4653707.0,World Cup 2026,Croatia,Luka Modric,65.5,U,0.591,62.7,52.0,90.0,WIN
+2026-07-02,4653707.0,World Cup 2026,Croatia,Josip Stanišić,40.5,O,0.535,44.3,26.0,90.0,LOSS
+2026-07-02,4653707.0,World Cup 2026,Croatia,Josip Sutalo,57.5,U,0.526,58.7,35.0,90.0,WIN
+2026-07-02,4653707.0,World Cup 2026,Portugal,João Cancelo,45.5,O,0.711,57.3,31.0,63.0,LOSS
+2026-07-02,4653707.0,World Cup 2026,Portugal,Bruno Fernandes,59.5,U,0.665,54.0,31.0,63.0,WIN
+2026-07-02,4653707.0,World Cup 2026,Portugal,Cristiano Ronaldo,23.5,U,0.652,21.3,22.0,81.0,WIN
+2026-07-02,4653707.0,World Cup 2026,Portugal,Pedro Lomba Neto,34.5,O,0.567,38.4,28.0,63.0,LOSS
+2026-07-02,4653707.0,World Cup 2026,Portugal,Rúben Dias,69.5,U,0.564,69.3,95.0,90.0,LOSS
+2026-07-02,4653707.0,World Cup 2026,Portugal,Nuno Mendes,53.5,U,0.533,54.1,59.0,90.0,LOSS
+2026-07-02,4653707.0,World Cup 2026,Portugal,Vitinha,94.5,O,0.512,98.2,75.0,62.0,LOSS
+2026-07-02,4653708.0,World Cup 2026,Spain,Mikel Oyarzabal,18.5,O,0.708,24.0,25.0,90.0,WIN
+2026-07-02,4653708.0,World Cup 2026,Spain,Rodri,105.5,U,0.675,95.6,92.0,90.0,WIN
+2026-07-02,4653708.0,World Cup 2026,Spain,Pedri,72.5,O,0.579,81.3,73.0,89.0,WIN
+2026-07-02,4653708.0,World Cup 2026,Spain,Aymeric Laporte,96.5,U,0.523,99.1,87.0,89.0,WIN
+2026-07-02,4653708.0,World Cup 2026,Spain,Marc Cucurella,54.5,O,0.5,56.5,55.0,90.0,WIN
+2026-07-02,4653717.0,World Cup 2026,Algeria,Ibrahim Maza,27.5,O,0.787,39.7,32.0,90.0,WIN
+2026-07-02,4653717.0,World Cup 2026,Algeria,Amine Gouiri,15.5,O,0.783,22.7,6.0,32.0,LOSS
+2026-07-02,4653717.0,World Cup 2026,Algeria,Ramy Bensebaini,68.5,U,0.733,58.0,82.0,90.0,LOSS
+2026-07-02,4653717.0,World Cup 2026,Algeria,Riyad Mahrez,25.5,O,0.724,33.8,31.0,71.0,WIN
+2026-07-02,4653717.0,World Cup 2026,Algeria,Rayan Aït-Nouri,38.5,O,0.644,46.1,52.0,90.0,WIN
+2026-07-02,4653717.0,World Cup 2026,Algeria,Luca Zidane,28.5,O,0.639,32.8,33.0,90.0,WIN
+2026-07-02,4653717.0,World Cup 2026,Switzerland,Rubén Vargas,23.5,O,0.808,35.2,23.0,71.0,LOSS
+2026-07-02,4653717.0,World Cup 2026,Switzerland,Breel Embolo,12.5,O,0.778,18.4,12.0,83.0,LOSS
+2026-07-02,4653717.0,World Cup 2026,Switzerland,Granit Xhaka,76.5,U,0.552,76.3,70.0,90.0,WIN
+2026-07-02,4653717.0,World Cup 2026,Switzerland,Gregor Kobel,33.5,U,0.547,33.4,38.0,90.0,LOSS
+2026-07-02,4653717.0,World Cup 2026,Switzerland,Manuel Akanji,75.5,O,0.5,77.8,67.0,90.0,LOSS
+2026-07-02,4653717.0,World Cup 2026,Switzerland,Ricardo Iván Rodríguez Araya,48.5,O,0.617,56.3,39.0,90.0,LOSS
+2026-07-01,4653709.0,World Cup 2026,Bosnia and Herzegovina,Edin Dzeko,18.5,O,0.712,23.8,15.0,51.0,LOSS
+2026-07-01,4653709.0,World Cup 2026,Bosnia and Herzegovina,Ermedin Demirovic,13.5,U,0.595,12.6,6.0,90.0,WIN
+2026-07-01,4653709.0,World Cup 2026,Bosnia and Herzegovina,Nikola Katic,41.5,O,0.537,45.4,44.0,75.0,WIN
+2026-07-01,4653709.0,World Cup 2026,Bosnia and Herzegovina,Nikola Vasilj,34.5,U,0.534,34.2,32.0,90.0,WIN
+2026-07-01,4653709.0,World Cup 2026,USA,Tim Ream,86.5,U,0.966,54.0,56.0,90.0,WIN
+2026-07-01,4653709.0,World Cup 2026,USA,Tyler Adams,69.5,U,0.819,53.8,47.0,90.0,WIN
+2026-07-01,4653709.0,World Cup 2026,USA,Weston McKennie,48.5,U,0.707,41.5,42.0,89.0,WIN
+2026-07-01,4653709.0,World Cup 2026,USA,Christian Pulisic,35.5,U,0.572,34.6,26.0,88.0,WIN
+2026-07-01,4653709.0,World Cup 2026,USA,Antonee Robinson,53.5,U,0.568,52.4,41.0,90.0,WIN
+2026-07-01,4653709.0,World Cup 2026,USA,Folarin Balogun,18.5,U,0.537,18.5,9.0,64.0,WIN
+2026-07-03,4653716.0,World Cup 2026,Australia,Alessandro Circati,48.5,U,0.712,42.2,71.0,120.0,LOSS
+2026-07-03,4653716.0,World Cup 2026,Australia,Harry Souttar,50.5,U,0.659,46.0,67.0,120.0,LOSS
+2026-07-03,4653716.0,World Cup 2026,Egypt,Mohamed Salah,32.5,O,0.64,38.1,39.0,120.0,WIN
+2026-07-03,4653716.0,World Cup 2026,Australia,Patrick Beach,24.5,U,0.626,23.1,28.0,119.0,LOSS
+2026-07-03,4653716.0,World Cup 2026,Australia,Aiden O'Neill,40.5,U,0.618,38.5,51.0,90.0,LOSS
+2026-07-03,4653716.0,World Cup 2026,Australia,Jordan Bos,28.5,U,0.609,26.8,11.0,45.0,WIN

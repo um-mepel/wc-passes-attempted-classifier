@@ -23,7 +23,8 @@ def expected_share(r_team: float, r_opp: float, s: float = 400.0) -> float:
 
 
 def compute_poss_elo(matches: pd.DataFrame, k: float = 120.0, s: float = 350.0,
-                     seed: float = 1500.0, g: float = 0.0) -> dict[str, list]:
+                     seed: float = 1500.0, g: float = 0.0,
+                     seed_map: dict[str, float] | None = None) -> dict[str, list]:
     """matches: one row per match, columns tn, on (normalised team/opp names), poss
     (team's realised possession share 0-1), date (sorted-able). Returns the rating timeline.
 
@@ -32,13 +33,21 @@ def compute_poss_elo(matches: pd.DataFrame, k: float = 120.0, s: float = 350.0,
     result-Elo gap (same units as the poss-Elo rating). g=0 is the strength-BLIND original.
     A modest g (~0.3) stops minnow blowouts (72% vs San Marino) from inflating the rating —
     that possession is EXPECTED given the strength gap, so it no longer moves the rating.
-    Validated: one-step-ahead possession corr 0.63->0.77 overall, 0.71->0.85 in mismatch games."""
+    Validated: one-step-ahead possession corr 0.63->0.77 overall, 0.71->0.85 in mismatch games.
+
+    seed_map gives each team a STARTING rating (its as-of result-Elo, shrunk toward 1500 by
+    a factor lambda) instead of the flat cold-start `seed`. A strong team should not begin the
+    possession battle rated neutral — its result-Elo is an informative prior. Validated
+    (lambda=0.5, one-step-ahead possession): WC2026 corr 0.780->0.808 MAE 7.11->6.80pp; mature
+    teams (>=3 history) 0.510->0.574 / 9.66->8.88pp — the gain PERSISTS past cold-start, and
+    largely SUBSUMES the g bake-in (seed-only beats g=0.3; stacking both over-corrects)."""
     rating: dict[str, float] = {}
     timeline: dict[str, list] = {}
+    seed_map = seed_map or {}
     has_ed = "elo_delta" in matches.columns
     for r in matches.sort_values("date").itertuples(index=False):
         t, o = r.tn, r.on
-        rt, ro = rating.get(t, seed), rating.get(o, seed)
+        rt, ro = rating.get(t, seed_map.get(t, seed)), rating.get(o, seed_map.get(o, seed))
         ed = getattr(r, "elo_delta", 0.0) if (has_ed and g) else 0.0
         ed = 0.0 if ed is None or ed != ed else float(ed)   # NaN-safe (ed!=ed catches NaN)
         gap = (rt - ro) + g * ed                        # bake in strength gap (same units)

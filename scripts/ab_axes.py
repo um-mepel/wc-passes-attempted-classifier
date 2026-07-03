@@ -128,6 +128,20 @@ def main():
                 s = _hiernb_samples(cfg, tr, te, list(_FEATURES), seed)
                 per_row.append(_score(v, s, te).assign(fold=fold.name))
                 continue
+            elif v.startswith("possseed"):
+                # possseed<lam>: baseline features, but poss-Elo is SEEDED at each team's as-of
+                # result-Elo (shrunk toward 1500 by lam) instead of the flat 1500 cold-start.
+                # Changes x_poss, so it needs its own feature build. e.g. possseed0p5 -> lam=0.5.
+                lam = float(v.replace("possseed", "").replace("p", ".") or "0.5")
+                cfg["features"]["poss_elo_seed_lambda"] = lam
+                fps = build(pd.concat([train, test]), cfg, style_map=km)
+                cfg["features"]["poss_elo_seed_lambda"] = 0.0
+                tr = fps[fps["match_id"].isin(train["match_id"]) & (fps["minutes"] > 0)]
+                te = fps[fps["match_id"].isin(test["match_id"]) & fps["started"].fillna(False)
+                         & (fps["minutes"] > 0)]
+                s = _hiernb_samples(cfg, tr, te, list(_FEATURES), seed)
+                per_row.append(_score(v, s, te).assign(fold=fold.name))
+                continue
             elif v == "way2":
                 s = _twostage_samples(cfg, ftrain, ftest, seed)
             else:

@@ -467,7 +467,24 @@ def _attach_poss_elo(pm: pd.DataFrame, cfg: Config) -> pd.DataFrame:
         mk = mk.merge(ed.rename(columns={"date": "date_n"}), on=["date_n", "tn", "on"], how="left")
         mk["elo_delta"] = mk["elo_delta"].fillna(0.0)   # unmatched (ESPN-only) -> no adjustment
         matches = mk[["date", "tn", "on", "poss", "elo_delta"]]
-    tl = compute_poss_elo(matches, g=g)
+    # STARTING VALUE: seed each team's poss-Elo at its as-of result-Elo (shrunk toward 1500 by
+    # lambda) instead of the flat 1500 cold-start. lambda=0 preserves the original behaviour.
+    lam = float(cfg["features"].get("poss_elo_seed_lambda", 0.0))
+    seed_map = None
+    if lam:
+        from .team_ratings import _asof, compute_elo
+        try:
+            espn_results = pd.read_parquet(cfg.path("raw") / "espn_results.parquet")
+        except (FileNotFoundError, OSError):
+            espn_results = pd.DataFrame(columns=["home", "away", "home_goals", "away_goals", "date"])
+        elo = _major_elo(cfg, espn_results) or compute_elo(
+            _combine_results(_fotmob_results(pm), espn_results))
+        first_date: dict[str, object] = {}
+        for r in matches.sort_values("date").itertuples(index=False):
+            first_date.setdefault(r.tn, r.date); first_date.setdefault(r.on, r.date)
+        seed_map = {tn: 1500.0 + lam * (_asof(elo, tn, dt) - 1500.0)
+                    for tn, dt in first_date.items()}
+    tl = compute_poss_elo(matches, g=g, seed_map=seed_map)
     d = pd.to_datetime(pm["match_date"], utc=True).dt.tz_localize(None)
     pm["team_poss_elo"] = [_asof(tl, t, x) for t, x in zip(pm["team"], d)]
     pm["opp_poss_elo"] = [_asof(tl, o, x) for o, x in zip(pm["opponent"], d)]

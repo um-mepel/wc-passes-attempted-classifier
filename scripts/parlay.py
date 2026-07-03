@@ -42,7 +42,8 @@ CC = {"FRA": "France", "NOR": "Norway", "ESP": "Spain", "URU": "Uruguay", "BEL":
       "NLD": "Netherlands", "DEU": "Germany", "JPN": "Japan", "MAR": "Morocco",
       "CIV": "Ivory Coast", "ECU": "Ecuador", "SWE": "Sweden", "PRY": "Paraguay",
       "BIH": "Bosnia and Herzegovina", "DZA2": "Algeria",
-      "CHE": "Switzerland", "SUI": "Switzerland", "CPV": "Cape Verde", "CAV": "Cape Verde"}
+      "CHE": "Switzerland", "SUI": "Switzerland", "CPV": "Cape Verde", "CAV": "Cape Verde",
+      "AUS": "Australia", "CAN": "Canada"}
 
 
 # Nordic/Germanic letters that NFD does NOT decompose (they're standalone letters,
